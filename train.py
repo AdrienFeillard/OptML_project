@@ -35,7 +35,7 @@ def main(
         checkpoint_name: str = typer.Option(None, "--save-as", help="Custom filename to save checkpoint (default: {classifier}_best.pth)"),
         dev: bool = typer.Option(False, "--dev", "-d", help="Run in development mode"),
         logger_type: LoggerType = typer.Option(LoggerType.tensorboard, "--logger", "-l", help="Logger to use"),
-        classifier: Classifier = typer.Option(Classifier.resnet18, "--classifier", "-c", help="Classifier model to use"),
+        classifier: str = typer.Option("resnet18", "--classifier", "-c", help="Classifier model to use"),
         pretrained: bool = typer.Option(False, "--pretrained", "-p", help="Use pre-trained model"),
         batch_size: int = typer.Option(128, "--batch-size", "-b", help="Batch size for training"),
         max_epochs: int = typer.Option(100, "--epochs", "-e", help="Maximum number of epochs"),

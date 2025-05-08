@@ -67,7 +67,7 @@ class PerturbedCIFAR10Module(nn.Module):
     def __init__(self, args):
         super().__init__()
 
-        print("CLASSIFIER ARGUMENT", args.classifier)
+        #print("CLASSIFIER ARGUMENT", args.classifier)
 
         assert args.noise_type in [None, 'gaussian', 'uniform'], "Invalid noise type"
         assert args.noise_position in [None, 'input', 'weight', 'gradient'], "Invalid noise position"
@@ -174,7 +174,7 @@ class PerturbedCIFAR10Module(nn.Module):
         # Assuming you want to apply noise to the model's weights.
         for name, param in self.model.named_parameters():
             if param.requires_grad and any(layer in name for layer in self.perturbed_layers_names):
-                #print("Add Perturbation to layer: ", name)
+                print("Add Perturbation to layer: ", name)
                 noise = self.getNoise(param)
                 param.data += noise
 
@@ -189,7 +189,7 @@ class PerturbedCIFAR10Module(nn.Module):
             if (param.requires_grad and
                     name in self.original_weights and
                     any(layer in name for layer in self.perturbed_layers_names)):
-                #print("Restore Perturbation to layer: ", name)
+                print("Restore Perturbation to layer: ", name)
                 param.data = self.original_weights[name].data
 
     def register_gradient_noise_hook(self):
