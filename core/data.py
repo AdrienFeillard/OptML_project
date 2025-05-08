@@ -11,6 +11,8 @@ from rich.console import Console
 from rich.progress import Progress, TextColumn, BarColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
 from rich.panel import Panel
 
+from torch.utils.data import Subset
+
 # Initialize Rich console
 console = Console()
 
@@ -28,6 +30,9 @@ class CIFAR10Data:
         # Datasets will be initialized in setup
         self.train_dataset = None
         self.val_dataset = None
+
+        # Store the % of the dataset we want to use
+        self.subset = args.subset
 
     @staticmethod
     def download_weights():
@@ -161,8 +166,16 @@ class CIFAR10Data:
             console.print(f"  • Class {i}: [cyan]{cls}[/cyan]")
 
     def train_dataloader(self):
+        if self.subset < 1.0:
+            subset_size = int(len(self.train_dataset) * self.subset)
+            indices = torch.randperm(len(self.train_dataset)).tolist()[:subset_size]
+            subset_train_dataset = Subset(self.train_dataset, indices)
+            dataset = subset_train_dataset
+        else:
+            dataset = self.train_dataset
+
         return DataLoader(
-            self.train_dataset,
+            dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=True,

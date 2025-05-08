@@ -2,8 +2,9 @@ import os
 import time
 import datetime
 import typer
+from typing import List
 import torch
-import torch_directml
+#import torch_directml
 from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
@@ -14,6 +15,7 @@ from rich.traceback import install as install_rich_traceback
 from utils.configs.config import Classifier, LoggerType
 from core.data import CIFAR10Data
 from core.module import CIFAR10Module
+from core.perturbedModule import PerturbedCIFAR10Module
 from core.noise_regularization import NoiseType, NoiseSchedule
 from utils.logging import LogHandler
 from utils.metrics import TrainingMetrics
@@ -24,9 +26,9 @@ install_rich_traceback(show_locals=True)
 
 # Initialize console
 console = Console()
-
 def main(
         data_dir: str = "./data/cifar10",
+        data_subset: float = typer.Option(1., "--subset", "-s", help="Subset of data to use (1: 10%, 2: 20%, 3: 50%, 4: 100%)"),
         download_weights: bool = typer.Option(False, "--download-weights", "-w", help="Download pre-trained weights"),
         test_phase: bool = typer.Option(False, "--test", "-t", help="Run in test phase"),
         checkpoint_path: str = typer.Option("checkpoints/resnet18_best.pth", "--checkpoint", help="Path to model checkpoint for testing"),
@@ -42,11 +44,12 @@ def main(
         learning_rate: float = typer.Option(1e-2, "--lr", help="Initial learning rate"),
         weight_decay: float = typer.Option(1e-2, "--wd", help="Weight decay"),
         visualize_lr: bool = typer.Option(False, "--visualize-lr", help="Visualize learning rate schedule"),
-        noise_type: NoiseType = typer.Option(NoiseType.none, "--noise-type", help="Type of noise regularization to apply"),
-        noise_magnitude: float = typer.Option(0.01, "--noise-magnitude",help="Initial magnitude of noise"),
-        noise_schedule: NoiseSchedule = typer.Option(NoiseSchedule.constant, "--noise-schedule",help="Schedule for noise magnitude over time"),
-        noise_layers: str = typer.Option(None, "--noise-layers",help="Comma-separated list of layer names to apply noise to (default: all layers)"),
-):
+        noise_position: str = typer.Option(None, "--noise-position", help="Position to apply noise regularization"),
+        noise_type: str = typer.Option(None, "--noise-type", help="Type of noise regularization to apply : None, gaussian or uniform"),
+        noise_std: float = typer.Option(0.01, "--noise-std", help="Initial standard deviacion of noise"),
+        noise_schedule: str = typer.Option(None, "--noise-schedule",help="Schedule for noise magnitude over time"),
+        noise_layer: List[str] = typer.Option(None, "--noise-layer",help="List of layer names to apply noise to (default: all layers). Example of use : --noise-layers conv1 --noise-layers conv2'"),
+        ):
     # Convert to args-like object for compatibility with existing code
     class Args:
         pass
@@ -55,6 +58,7 @@ def main(
     args.data_dir = data_dir
     args.checkpoint_name = checkpoint_name
     args.download_weights = 1 if download_weights else 0
+    args.subset = data_subset
     args.test_phase = 1 if test_phase else 0
     args.dev = 1 if dev else 0
     args.logger = logger_type
@@ -67,10 +71,12 @@ def main(
     args.gpu_id = gpu_id
     args.learning_rate = learning_rate
     args.weight_decay = weight_decay
+    args.noise_position = noise_position
     args.noise_type = noise_type
-    args.noise_magnitude = noise_magnitude
+    args.noise_std = noise_std
     args.noise_schedule = noise_schedule
-    args.noise_layers = noise_layers
+    args.noise_layer = noise_layer
+
     args.checkpoint_path = checkpoint_path
 
     # Initialize metrics and log handler
@@ -84,15 +90,15 @@ def main(
     log_handler.log("SYSTEM", "Random seed set to 0 for reproducibility")
 
     # Initialize DirectML device
-    try:
-        device_id = int(args.gpu_id.split(",")[0])  # Use first GPU if multiple specified
-        log_handler.log("SYSTEM", f"Initializing DirectML device {device_id}")
-        device = torch_directml.device(device_id)
-        log_handler.log("SYSTEM", f"Using DirectML device: {device}")
-    except Exception as e:
-        log_handler.log("ERROR", f"Error initializing DirectML: {e}")
-        log_handler.log("SYSTEM", "Falling back to CPU")
-        device = torch.device("cpu")
+    # try:
+    #     device_id = int(args.gpu_id.split(",")[0])  # Use first GPU if multiple specified
+    #     log_handler.log("SYSTEM", f"Initializing DirectML device {device_id}")
+    #     device = torch_directml.device(device_id)
+    #     log_handler.log("SYSTEM", f"Using DirectML device: {device}")
+    # except Exception as e:
+        #log_handler.log("ERROR", f"Error initializing DirectML: {e}")
+    log_handler.log("SYSTEM", "Falling back to CPU")
+    device = torch.device("cpu")
 
     # Download pre-trained weights if requested
     if bool(args.download_weights):
@@ -102,7 +108,8 @@ def main(
 
     # Create model
     log_handler.log("MODEL", f"Creating {args.classifier} model...")
-    model = CIFAR10Module(args)
+    #model = CIFAR10Module(args)
+    model = PerturbedCIFAR10Module(args)
 
     # Set up data
     log_handler.log("DATA", "Preparing CIFAR-10 dataset...")
@@ -185,15 +192,15 @@ def main(
                 images, targets = images.to(device), targets.to(device)
 
                 # Apply weight noise if enabled
-                if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.weight:
-                    model.noise_regularizer.apply_weight_noise(model, permanent=False)
+                #if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.weight:
+                #    model.noise_regularizer.apply_weight_noise(model, permanent=False)
 
                 # Forward pass
                 outputs = model(images)
 
                 # Apply label noise if enabled
-                if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.label:
-                    targets = model.noise_regularizer.apply_label_noise(targets)
+                #if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.label:
+                #    targets = model.noise_regularizer.apply_label_noise(targets)
 
                 # Calculate loss
                 loss = model.criterion(outputs, targets)
@@ -203,8 +210,8 @@ def main(
                 loss.backward()
 
                 # Apply gradient noise if enabled
-                if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.gradient:
-                    model.noise_regularizer.apply_gradient_noise(model)
+                #if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.gradient:
+                #    model.noise_regularizer.apply_gradient_noise(model)
 
                 # Update weights
                 optimizer.step()
