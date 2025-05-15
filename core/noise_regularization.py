@@ -21,6 +21,10 @@ class NoiseType(str, Enum):
     label = "label"
     dropout = "dropout"
 
+class NoiseDistribution(str, Enum):
+    gaussian = "gaussian"
+    uniform = "uniform"
+
 class NoiseSchedule(str, Enum):
     constant = "constant"
     linear = "linear"
@@ -39,6 +43,8 @@ class NoiseRegularizer:
             apply_to_layers: Optional[List[str]] = None,
             # Dropout specific parameters
             dropout_prob: float = 0.1,
+            # Noise distribution
+            noise_distribution: NoiseDistribution = NoiseDistribution.gaussian,
             # Tracking metrics
             track_metrics: bool = True
     ):
@@ -50,6 +56,7 @@ class NoiseRegularizer:
         self.current_epoch = 0
         self.apply_to_layers = apply_to_layers
         self.dropout_prob = dropout_prob
+        self.noise_distribution = noise_distribution
         self.track_metrics = track_metrics
 
         # Initialize metrics tracking
@@ -58,12 +65,18 @@ class NoiseRegularizer:
             'gradient_norm_after': [],
             'weight_norm_before': [],
             'weight_norm_after': [],
+            'input_norm_before': [],
+            'input_norm_after': [],
             'noise_magnitude': [],
             'epoch': []
         }
 
         # For layer-specific application
         self.layer_metrics = {}
+
+        # For weight noise preservation
+        self.original_weights = {}
+        self.has_registered_hooks = False
 
     def update_epoch(self, epoch: int):
         """Update current epoch for noise scheduling"""
@@ -91,6 +104,17 @@ class NoiseRegularizer:
         self.metrics['noise_magnitude'].append(self.current_magnitude)
         self.metrics['epoch'].append(self.current_epoch)
 
+    def get_noise(self, x):
+        """Generate noise based on the specified distribution"""
+        if self.noise_distribution == NoiseDistribution.gaussian:
+            return torch.randn_like(x) * self.current_magnitude
+        elif self.noise_distribution == NoiseDistribution.uniform:
+            # Scale uniform noise to match the variance of gaussian
+            a = (3**0.5) * self.current_magnitude  # uniform distribution with requested std
+            return torch.empty_like(x).uniform_(-a, a)
+        else:
+            raise ValueError(f"Invalid noise distribution: {self.noise_distribution}")
+
     def apply_gradient_noise(self, model: nn.Module):
         """Apply noise to gradients during backpropagation"""
         total_norm_before = 0
@@ -106,8 +130,8 @@ class NoiseRegularizer:
                 grad_norm_before = param.grad.norm().item()
                 total_norm_before += grad_norm_before
 
-                # Apply Gaussian noise to gradients
-                noise = torch.randn_like(param.grad) * self.current_magnitude
+                # Apply noise to gradients based on distribution
+                noise = self.get_noise(param.grad)
                 param.grad.add_(noise)
 
                 # Track gradient norm after noise
@@ -131,6 +155,44 @@ class NoiseRegularizer:
             self.metrics['gradient_norm_before'].append(total_norm_before)
             self.metrics['gradient_norm_after'].append(total_norm_after)
 
+    def register_gradient_noise_hook(self, model: nn.Module):
+        """Register hooks to add noise to gradients during backpropagation"""
+        if self.has_registered_hooks:
+            return
+
+        total_hooks = 0
+
+        # Create hook for adding noise to gradients
+        def add_noise_to_grad(name):
+            def hook(grad):
+                # Track grad norm before
+                grad_norm_before = grad.norm().item()
+
+                # Add noise
+                noisy_grad = grad + self.get_noise(grad)
+
+                # Track grad norm after
+                grad_norm_after = noisy_grad.norm().item()
+
+                # Add metrics to layer data
+                if name in self.layer_metrics:
+                    self.layer_metrics[name].setdefault('grad_norm_before', []).append(grad_norm_before)
+                    self.layer_metrics[name].setdefault('grad_norm_after', []).append(grad_norm_after)
+                    self.layer_metrics[name].setdefault('noise_effect', []).append(grad_norm_after / max(1e-8, grad_norm_before))
+
+                return noisy_grad
+            return hook
+
+        # Register hooks for each parameter
+        for name, param in model.named_parameters():
+            if (param.requires_grad and
+                    (not self.apply_to_layers or any(layer_name in name for layer_name in self.apply_to_layers))):
+                param.register_hook(add_noise_to_grad(name))
+                total_hooks += 1
+
+        self.has_registered_hooks = True
+        print(f"Added {total_hooks} gradient noise hooks")
+
     def apply_weight_noise(self, model: nn.Module, permanent: bool = False):
         """Apply noise directly to model weights"""
         total_norm_before = 0
@@ -149,9 +211,15 @@ class NoiseRegularizer:
                 weight_norm_before = param.norm().item()
                 total_norm_before += weight_norm_before
 
-                # Apply Gaussian noise to weights
-                noise = torch.randn_like(param) * self.current_magnitude
-                param.add_(noise)
+                # Apply noise to weights - AVOID IN-PLACE OPERATIONS by using clone and assignment
+                if param.requires_grad and not permanent:
+                    # For params that require gradients, create a new tensor
+                    noise = self.get_noise(param)
+                    param.data = param.data + noise  # Use .data to modify the tensor's data without triggering autograd
+                else:
+                    # For params that don't require gradients or if applying permanently
+                    noise = self.get_noise(param)
+                    param.add_(noise)  # In-place is fine for this case
 
                 # Track weight norm after noise
                 weight_norm_after = param.norm().item()
@@ -174,11 +242,45 @@ class NoiseRegularizer:
             self.metrics['weight_norm_before'].append(total_norm_before)
             self.metrics['weight_norm_after'].append(total_norm_after)
 
+    def save_original_weights(self, model: nn.Module):
+        """Save original weights before perturbation"""
+        self.original_weights = {
+            name: param.clone()
+            for name, param in model.named_parameters()
+            if param.requires_grad
+        }
+
+    def restore_weights(self, model: nn.Module):
+        """Restore original weights after forward pass"""
+        if not self.original_weights:
+            return
+
+        with torch.no_grad():
+            for name, param in model.named_parameters():
+                if (param.requires_grad and
+                        name in self.original_weights and
+                        (not self.apply_to_layers or any(layer_name in name for layer_name in self.apply_to_layers))):
+                    param.data = self.original_weights[name].data
+
+        # Clear the original weights after restoring
+        self.original_weights = {}
+
     def apply_input_noise(self, inputs: torch.Tensor) -> torch.Tensor:
         """Apply noise to input data"""
-        # Apply Gaussian noise to inputs
-        noise = torch.randn_like(inputs) * self.current_magnitude
+        # Track input norm before
+        if self.track_metrics:
+            input_norm_before = inputs.norm().item()
+            self.metrics['input_norm_before'].append(input_norm_before)
+
+        # Apply noise based on distribution
+        noise = self.get_noise(inputs)
         noisy_inputs = inputs + noise
+
+        # Track input norm after
+        if self.track_metrics:
+            input_norm_after = noisy_inputs.norm().item()
+            self.metrics['input_norm_after'].append(input_norm_after)
+
         return noisy_inputs
 
     def apply_label_noise(self, labels: torch.Tensor, num_classes: int = 10) -> torch.Tensor:
@@ -208,8 +310,9 @@ class NoiseRegularizer:
         table.add_column("Metric", style="yellow")
         table.add_column("Value", style="cyan")
 
-        # Add noise type and current magnitude
+        # Add noise settings
         table.add_row("Noise Type", f"{self.noise_type}")
+        table.add_row("Noise Distribution", f"{self.noise_distribution}")
         table.add_row("Current Magnitude", f"{self.current_magnitude:.6f}")
         table.add_row("Schedule", f"{self.schedule}")
 
@@ -228,6 +331,14 @@ class NoiseRegularizer:
             after = self.metrics['weight_norm_after'][last_idx]
             table.add_row("Weight Norm (Before)", f"{before:.4f}")
             table.add_row("Weight Norm (After)", f"{after:.4f}")
+            table.add_row("Norm Ratio", f"{after/before:.4f}")
+
+        elif self.noise_type == NoiseType.input and self.metrics['input_norm_before']:
+            last_idx = -1
+            before = self.metrics['input_norm_before'][last_idx]
+            after = self.metrics['input_norm_after'][last_idx]
+            table.add_row("Input Norm (Before)", f"{before:.4f}")
+            table.add_row("Input Norm (After)", f"{after:.4f}")
             table.add_row("Norm Ratio", f"{after/before:.4f}")
 
         elif self.noise_type == NoiseType.label and 'labels_flipped' in self.metrics:
@@ -315,6 +426,11 @@ class NoiseRegularizer:
             axs[1].plot(self.metrics['epoch'], self.metrics['weight_norm_before'], 'g-', label='Before Noise')
             axs[1].plot(self.metrics['epoch'], self.metrics['weight_norm_after'], 'r-', label='After Noise')
             axs[1].set_title('Weight Norm Before/After Noise')
+
+        elif self.noise_type == NoiseType.input and self.metrics['input_norm_before']:
+            axs[1].plot(self.metrics['epoch'], self.metrics['input_norm_before'], 'g-', label='Before Noise')
+            axs[1].plot(self.metrics['epoch'], self.metrics['input_norm_after'], 'r-', label='After Noise')
+            axs[1].set_title('Input Norm Before/After Noise')
 
         elif self.noise_type == NoiseType.label and 'labels_flipped' in self.metrics:
             axs[1].plot(self.metrics['epoch'], self.metrics['labels_flipped'], 'r-', label='Labels Flipped')

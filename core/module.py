@@ -17,7 +17,7 @@ from .cifar10_models.mobilenetv2 import mobilenet_v2
 from .cifar10_models.resnet import resnet18, resnet34, resnet50
 from .cifar10_models.vgg import vgg11_bn, vgg13_bn, vgg16_bn, vgg19_bn
 from .schduler import WarmupCosineLR
-from .noise_regularization import NoiseType, NoiseRegularizer
+from .noise_regularization import NoiseType, NoiseRegularizer, NoiseDistribution
 
 # Initialize console for rich output
 console = Console()
@@ -99,15 +99,27 @@ class CIFAR10Module(nn.Module):
         # Initialize noise regularizer if specified
         self.noise_regularizer = None
         if hasattr(args, 'noise_type') and args.noise_type != NoiseType.none:
-            console.print(Panel(f"[bold]Setting up {args.noise_type} noise regularization[/bold]",
-                                title="Noise Regularization", border_style="yellow"))
+            # Get noise distribution (default to gaussian if not specified)
+            noise_distribution = getattr(args, 'noise_distribution', NoiseDistribution.gaussian)
+
+            console.print(Panel(
+                f"[bold]Setting up {args.noise_type} noise regularization with {noise_distribution} distribution[/bold]",
+                title="Noise Regularization",
+                border_style="yellow"
+            ))
+
             self.noise_regularizer = NoiseRegularizer(
                 noise_type=args.noise_type,
                 magnitude=args.noise_magnitude,
                 schedule=args.noise_schedule,
                 max_epochs=args.max_epochs,
-                apply_to_layers=args.noise_layers.split(',') if args.noise_layers else None
+                apply_to_layers=args.noise_layers.split(',') if args.noise_layers else None,
+                noise_distribution=noise_distribution
             )
+
+            # Register gradient hooks if using gradient noise
+            if args.noise_type == NoiseType.gradient:
+                self.noise_regularizer.register_gradient_noise_hook(self)
 
         # Print model layers summary
         self._print_model_summary()
@@ -150,8 +162,19 @@ class CIFAR10Module(nn.Module):
         if hasattr(self, 'noise_regularizer') and self.noise_regularizer and self.noise_regularizer.noise_type == NoiseType.input:
             images = self.noise_regularizer.apply_input_noise(images)
 
+        # Apply weight noise if configured (temporary during forward pass)
+        if hasattr(self, 'noise_regularizer') and self.noise_regularizer and self.noise_regularizer.noise_type == NoiseType.weight:
+            self.noise_regularizer.save_original_weights(self)
+            self.noise_regularizer.apply_weight_noise(self, permanent=False)
+
         # Forward pass through the model
-        return self.model(images)
+        outputs = self.model(images)
+
+        # Restore original weights if we applied weight noise
+        if hasattr(self, 'noise_regularizer') and self.noise_regularizer and self.noise_regularizer.noise_type == NoiseType.weight:
+            self.noise_regularizer.restore_weights(self)
+
+        return outputs
 
     def configure_optimizer(self):
         # Create optimizer with momentum
