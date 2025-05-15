@@ -19,6 +19,10 @@ class LoggerType(str, Enum):
     tensorboard = "tensorboard"
     wandb = "wandb"
 
+class NoiseDistribution(str, Enum):
+    gaussian = "gaussian"
+    uniform = "uniform"
+
 # Theme for visualization
 THEME = {
     "title": "magenta",
