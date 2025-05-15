@@ -15,6 +15,7 @@ sys.path.append(os.getcwd())
 # Import from modules
 from core.data import CIFAR10Data
 from core.module import CIFAR10Module
+from utils.configs.config import Classifier, NoiseDistribution
 from core.noise_regularization import NoiseType, NoiseSchedule
 
 # Initialize console
@@ -26,7 +27,9 @@ def main(
         data_dir: str = typer.Option("./data/cifar10", "--data-dir", "-d", help="Path to data directory"),
         batch_size: int = typer.Option(128, "--batch-size", "-b", help="Batch size for testing"),
         num_workers: int = typer.Option(4, "--workers", "-w", help="Number of data loading workers"),
-        gpu_id: str = typer.Option("0", "--gpu", "-g", help="GPU ID to use")
+        gpu_id: str = typer.Option("0", "--gpu", "-g", help="GPU ID to use"),
+        noise_distribution: NoiseDistribution = typer.Option(NoiseDistribution.gaussian, "--noise-distribution", help="Distribution of noise (gaussian or uniform)"),
+
 ):
 
     console.print(Panel(f"[bold cyan]Testing {classifier} model[/bold cyan]",
@@ -49,6 +52,7 @@ def main(
     args.noise_magnitude = 0.0
     args.noise_schedule = NoiseSchedule.constant
     args.noise_layers = None
+    args.noise_distribution = noise_distribution
 
     # Set up device
     try:

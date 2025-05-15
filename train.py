@@ -2,9 +2,8 @@ import os
 import time
 import datetime
 import typer
-from typing import List
 import torch
-#import torch_directml
+import torch_directml
 from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
@@ -12,44 +11,51 @@ from rich.live import Live
 from rich.traceback import install as install_rich_traceback
 
 # Import from reorganized modules
-from utils.configs.config import Classifier, LoggerType
 from core.data import CIFAR10Data
 from core.module import CIFAR10Module
-from core.perturbedModule import PerturbedCIFAR10Module
-from core.noise_regularization import NoiseType, NoiseSchedule
 from utils.logging import LogHandler
 from utils.metrics import TrainingMetrics
 from utils.visualization import create_dashboard, visualize_lr_schedule
-
+from utils.configs.config import Classifier, LoggerType, NoiseDistribution
+from core.noise_regularization import NoiseType, NoiseSchedule
 # Install rich traceback handler
 install_rich_traceback(show_locals=True)
 
 # Initialize console
 console = Console()
+
 def main(
-        data_dir: str = "./data/cifar10",
-        data_subset: float = typer.Option(1., "--subset", "-s", help="Subset of data to use (1: 10%, 2: 20%, 3: 50%, 4: 100%)"),
         download_weights: bool = typer.Option(False, "--download-weights", "-w", help="Download pre-trained weights"),
-        test_phase: bool = typer.Option(False, "--test", "-t", help="Run in test phase"),
-        checkpoint_path: str = typer.Option("checkpoints/resnet18_best.pth", "--checkpoint", help="Path to model checkpoint for testing"),
-        checkpoint_name: str = typer.Option(None, "--save-as", help="Custom filename to save checkpoint (default: {classifier}_best.pth)"),
-        dev: bool = typer.Option(False, "--dev", "-d", help="Run in development mode"),
-        logger_type: LoggerType = typer.Option(LoggerType.tensorboard, "--logger", "-l", help="Logger to use"),
-        classifier: str = typer.Option("resnet18", "--classifier", "-c", help="Classifier model to use"),
-        pretrained: bool = typer.Option(False, "--pretrained", "-p", help="Use pre-trained model"),
+
+        # Data & model configuration
+        data_dir: str = "./data/cifar10",
+        classifier: Classifier = typer.Option(Classifier.resnet18, "--classifier", "-c", help="Classifier model to use"),
+
+        # Training parameters
         batch_size: int = typer.Option(128, "--batch-size", "-b", help="Batch size for training"),
         max_epochs: int = typer.Option(100, "--epochs", "-e", help="Maximum number of epochs"),
-        num_workers: int = typer.Option(4, "--workers", "-w", help="Number of data loading workers"),
-        gpu_id: str = typer.Option("0", "--gpu", "-g", help="GPU ID(s) to use"),
+        num_workers: int = typer.Option(4, "--workers", "-n", help="Number of data loading workers"),
+        subset: float = typer.Option(1.0, "--subset", help="Fraction of dataset to use for training (0.0-1.0)"),
+
+        # Optimizer configuration
         learning_rate: float = typer.Option(1e-2, "--lr", help="Initial learning rate"),
         weight_decay: float = typer.Option(1e-2, "--wd", help="Weight decay"),
         visualize_lr: bool = typer.Option(False, "--visualize-lr", help="Visualize learning rate schedule"),
-        noise_position: str = typer.Option(None, "--noise-position", help="Position to apply noise regularization"),
-        noise_type: str = typer.Option(None, "--noise-type", help="Type of noise regularization to apply : None, gaussian or uniform"),
-        noise_std: float = typer.Option(0.01, "--noise-std", help="Initial standard deviacion of noise"),
-        noise_schedule: str = typer.Option(None, "--noise-schedule",help="Schedule for noise magnitude over time"),
-        noise_layer: List[str] = typer.Option(None, "--noise-layer",help="List of layer names to apply noise to (default: all layers). Example of use : --noise-layers conv1 --noise-layers conv2'"),
-        ):
+
+        # Device configuration
+        gpu_id: str = typer.Option("0", "--gpu", "-g", help="GPU ID(s) to use"),
+
+        # Checkpoint handling
+        checkpoint_name: str = typer.Option("checkpoints/resnet18_best.pth", "--save-as", help="Custom filename to save checkpoint (default: {classifier}_best.pth)"),
+
+        # Noise regularization
+        noise_type: NoiseType = typer.Option(NoiseType.none, "--noise-type", help="Type of noise regularization to apply"),
+        noise_magnitude: float = typer.Option(0.01, "--noise-magnitude", help="Initial magnitude of noise"),
+        noise_schedule: NoiseSchedule = typer.Option(NoiseSchedule.constant, "--noise-schedule", help="Schedule for noise magnitude over time"),
+        noise_layers: str = typer.Option(None, "--noise-layers", help="Comma-separated list of layer names to apply noise to (default: all layers)"),
+        noise_distribution: NoiseDistribution = typer.Option(NoiseDistribution.gaussian, "--noise-distribution", help="Distribution of noise (gaussian or uniform)"),
+
+):
     # Convert to args-like object for compatibility with existing code
     class Args:
         pass
@@ -58,30 +64,32 @@ def main(
     args.data_dir = data_dir
     args.checkpoint_name = checkpoint_name
     args.download_weights = 1 if download_weights else 0
-    args.subset = data_subset
-    args.test_phase = 1 if test_phase else 0
-    args.dev = 1 if dev else 0
-    args.logger = logger_type
     args.classifier = classifier
     args.model = None
-    args.pretrained = 1 if pretrained else 0
     args.batch_size = batch_size
     args.max_epochs = max_epochs
     args.num_workers = num_workers
     args.gpu_id = gpu_id
     args.learning_rate = learning_rate
     args.weight_decay = weight_decay
-    args.noise_position = noise_position
     args.noise_type = noise_type
-    args.noise_std = noise_std
+    args.noise_magnitude = noise_magnitude
     args.noise_schedule = noise_schedule
-    args.noise_layer = noise_layer
-
-    args.checkpoint_path = checkpoint_path
-
+    args.noise_layers = noise_layers
+    args.noise_distribution = noise_distribution
+    args.subset = subset
+    args.test_phase = False
     # Initialize metrics and log handler
-    training_metrics = TrainingMetrics()
+    experiment_name = f"{args.classifier}_{args.noise_type}"
+    if args.noise_type != NoiseType.none:
+        experiment_name += f"_{args.noise_distribution}_{args.noise_magnitude}"
+
+    # Initialize metrics with experiment name for saving
+    training_metrics = TrainingMetrics(experiment_name=experiment_name)
+    training_metrics.set_config(args)  # Save configuration
+
     log_handler = LogHandler()
+
 
     log_handler.log("SYSTEM", f"Starting CIFAR-10 with {classifier}")
 
@@ -90,15 +98,15 @@ def main(
     log_handler.log("SYSTEM", "Random seed set to 0 for reproducibility")
 
     # Initialize DirectML device
-    # try:
-    #     device_id = int(args.gpu_id.split(",")[0])  # Use first GPU if multiple specified
-    #     log_handler.log("SYSTEM", f"Initializing DirectML device {device_id}")
-    #     device = torch_directml.device(device_id)
-    #     log_handler.log("SYSTEM", f"Using DirectML device: {device}")
-    # except Exception as e:
-        #log_handler.log("ERROR", f"Error initializing DirectML: {e}")
-    log_handler.log("SYSTEM", "Falling back to CPU")
-    device = torch.device("cpu")
+    try:
+        device_id = int(args.gpu_id.split(",")[0])  # Use first GPU if multiple specified
+        log_handler.log("SYSTEM", f"Initializing DirectML device {device_id}")
+        device = torch_directml.device(device_id)
+        log_handler.log("SYSTEM", f"Using DirectML device: {device}")
+    except Exception as e:
+        log_handler.log("ERROR", f"Error initializing DirectML: {e}")
+        log_handler.log("SYSTEM", "Falling back to CPU")
+        device = torch.device("cpu")
 
     # Download pre-trained weights if requested
     if bool(args.download_weights):
@@ -108,8 +116,7 @@ def main(
 
     # Create model
     log_handler.log("MODEL", f"Creating {args.classifier} model...")
-    #model = CIFAR10Module(args)
-    model = PerturbedCIFAR10Module(args)
+    model = CIFAR10Module(args)
 
     # Set up data
     log_handler.log("DATA", "Preparing CIFAR-10 dataset...")
@@ -132,6 +139,8 @@ def main(
     # Create directories for checkpoints
     os.makedirs("checkpoints", exist_ok=True)
     log_handler.log("SYSTEM", "Created checkpoints directory")
+
+    training_metrics.log_weight_norms(model, epoch=0)
 
     # Get data loaders
     train_loader = data.train_dataloader()
@@ -177,6 +186,14 @@ def main(
             # Update noise regularizer epoch counter
             if hasattr(model, 'noise_regularizer') and model.noise_regularizer:
                 model.noise_regularizer.update_epoch(epoch)
+                current_magnitude = model.noise_regularizer.current_magnitude
+
+                # Log noise metrics
+                training_metrics.log_noise_metrics(
+                    noise_type=str(model.noise_regularizer.noise_type),
+                    noise_magnitude=current_magnitude,
+                    epoch=epoch+1
+                )
                 log_handler.log("NOISE", f"Applying {model.noise_regularizer.noise_type} noise with magnitude {model.noise_regularizer.current_magnitude:.6f}")
             train_loss = 0.0
             train_correct = 0
@@ -192,15 +209,31 @@ def main(
                 images, targets = images.to(device), targets.to(device)
 
                 # Apply weight noise if enabled
-                #if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.weight:
-                #    model.noise_regularizer.apply_weight_noise(model, permanent=False)
+                if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.weight:
+                    # Log weight norms before noise application
+                    weight_norms_before = training_metrics.log_weight_norms(model, epoch+1, batch_idx)
+
+                    model.noise_regularizer.apply_weight_noise(model, permanent=False)
+
+                    # Log weight norms after noise application
+                    weight_norms_after = training_metrics.log_weight_norms(model, epoch+1, batch_idx)
+
+                    # Record noise effects
+                    if batch_idx % 50 == 0:  # Don't log too frequently
+                        training_metrics.log_noise_metrics(
+                            noise_type=str(model.noise_regularizer.noise_type),
+                            noise_magnitude=model.noise_regularizer.current_magnitude,
+                            norms_before=weight_norms_before,
+                            norms_after=weight_norms_after,
+                            epoch=epoch+1
+                        )
 
                 # Forward pass
                 outputs = model(images)
 
                 # Apply label noise if enabled
-                #if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.label:
-                #    targets = model.noise_regularizer.apply_label_noise(targets)
+                if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.label:
+                    targets = model.noise_regularizer.apply_label_noise(targets)
 
                 # Calculate loss
                 loss = model.criterion(outputs, targets)
@@ -210,8 +243,25 @@ def main(
                 loss.backward()
 
                 # Apply gradient noise if enabled
-                #if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.gradient:
-                #    model.noise_regularizer.apply_gradient_noise(model)
+                if batch_idx % 50 == 0:  # Don't log too frequently
+                    grad_norms_before = training_metrics.log_gradient_norms(model, epoch+1, batch_idx)
+
+                # After applying gradient noise:
+                if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.gradient:
+                    model.noise_regularizer.apply_gradient_noise(model)
+
+                    # Log gradient norms after noise application
+                    if batch_idx % 50 == 0:  # Don't log too frequently
+                        grad_norms_after = training_metrics.log_gradient_norms(model, epoch+1, batch_idx)
+
+                        # Update noise metrics with before/after data
+                        training_metrics.log_noise_metrics(
+                            noise_type=str(model.noise_regularizer.noise_type),
+                            noise_magnitude=model.noise_regularizer.current_magnitude,
+                            norms_before=grad_norms_before,
+                            norms_after=grad_norms_after,
+                            epoch=epoch+1
+                        )
 
                 # Update weights
                 optimizer.step()
@@ -342,13 +392,29 @@ def main(
             f"Best accuracy: {best_acc:.2f}%"
         )
 
-    # Final summary panel
+    # Measure model sharpness
+    sharpness_data = training_metrics.measure_sharpness(
+        model=model,
+        criterion=model.criterion,
+        val_loader=val_loader,
+        device=device
+    )
+
+    # Save final metrics
+    training_metrics.save_final_metrics(
+        best_acc=best_acc / 100.0,  # Convert to 0-1 range
+        final_epoch=args.max_epochs,
+        total_time=total_time
+    )
+
+    # Update the final summary panel to include metrics location
     console.print(Panel(
         f"[bold green]Training completed![/bold green]\n"
         f"[bold]Model:[/bold] {args.classifier}\n"
         f"[bold]Total training time:[/bold] {datetime.timedelta(seconds=int(total_time))}\n"
         f"[bold]Best validation accuracy:[/bold] {best_acc:.2f}%\n"
-        f"[bold]Checkpoint saved to:[/bold] checkpoints/{args.classifier}_best.pth",
+        f"[bold]Checkpoint saved to:[/bold] checkpoints/{args.classifier}_best.pth\n"
+        f"[bold]Metrics saved to:[/bold] {training_metrics.metrics_dir}",
         title="Training Results",
         border_style="green"
     ))
