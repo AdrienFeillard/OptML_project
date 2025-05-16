@@ -3,7 +3,7 @@ import time
 import datetime
 import typer
 import torch
-import torch_directml
+#import torch_directml
 from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
@@ -35,7 +35,7 @@ def main(
         batch_size: int = typer.Option(128, "--batch-size", "-b", help="Batch size for training"),
         max_epochs: int = typer.Option(100, "--epochs", "-e", help="Maximum number of epochs"),
         num_workers: int = typer.Option(4, "--workers", "-n", help="Number of data loading workers"),
-        subset: float = typer.Option(1.0, "--subset", help="Fraction of dataset to use for training (0.0-1.0)"),
+        subset: float = typer.Option(1.0, "--subset", "-s", help="Fraction of dataset to use for training (0.0-1.0)"),
 
         # Optimizer configuration
         learning_rate: float = typer.Option(1e-2, "--lr", help="Initial learning rate"),
@@ -46,7 +46,7 @@ def main(
         gpu_id: str = typer.Option("0", "--gpu", "-g", help="GPU ID(s) to use"),
 
         # Checkpoint handling
-        checkpoint_name: str = typer.Option("checkpoints/resnet18_best.pth", "--save-as", help="Custom filename to save checkpoint (default: {classifier}_best.pth)"),
+        checkpoint_name: str = typer.Option("none.pth", "--save-as", help="Custom filename to save checkpoint (default: {classifier}_best.pth)"),
 
         # Noise regularization
         noise_type: NoiseType = typer.Option(NoiseType.none, "--noise-type", help="Type of noise regularization to apply"),
@@ -106,7 +106,14 @@ def main(
     except Exception as e:
         log_handler.log("ERROR", f"Error initializing DirectML: {e}")
         log_handler.log("SYSTEM", "Falling back to CPU")
-        device = torch.device("cpu")
+
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+            device = "mps"
+            print("MPS USEDD")
+        else:
+            device = "cpu"
 
     # Download pre-trained weights if requested
     if bool(args.download_weights):
