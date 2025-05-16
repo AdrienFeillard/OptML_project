@@ -27,8 +27,7 @@ try:
     import torch_directml
     HAS_DIRECTML = True
 except (ImportError, TypeError) as e:
-    console.print(Panel(f"[yellow]DirectML import error: {e}[/yellow]",
-                        title="Import Warning", border_style="yellow"))
+    #console.print(Panel(f"[yellow]DirectML import error: {e}[/yellow]", title="Import Warning", border_style="yellow"))
     HAS_DIRECTML = False
 
 all_classifiers = {
