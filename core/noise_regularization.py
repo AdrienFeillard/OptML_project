@@ -37,8 +37,8 @@ class NoiseRegularizer:
             self,
             noise_type: NoiseType,
             magnitude: float,
-            schedule: NoiseSchedule,
             max_epochs: int,
+            schedule: NoiseSchedule = NoiseSchedule.constant,
             # Layer-specific parameters
             apply_to_layers: Optional[List[str]] = None,
             # Dropout specific parameters

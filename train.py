@@ -109,11 +109,13 @@ def main(
 
         if torch.cuda.is_available():
             device = "cuda"
+            print("CUDA USED")
         elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
             device = "mps"
-            print("MPS USEDD")
+            print("MPS USED")
         else:
             device = "cpu"
+            print("CPU USED")
 
     # Download pre-trained weights if requested
     if bool(args.download_weights):
@@ -217,10 +219,16 @@ def main(
 
                 # Apply weight noise if enabled
                 if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.weight:
+
+                    permanent = False
+
+                    if not permanent:
+                        model.noise_regularizer.save_original_weights(model)
+
                     # Log weight norms before noise application
                     weight_norms_before = training_metrics.log_weight_norms(model, epoch+1, batch_idx)
 
-                    model.noise_regularizer.apply_weight_noise(model, permanent=False)
+                    model.noise_regularizer.apply_weight_noise(model, permanent=permanent)
 
                     # Log weight norms after noise application
                     weight_norms_after = training_metrics.log_weight_norms(model, epoch+1, batch_idx)
@@ -235,12 +243,12 @@ def main(
                             epoch=epoch+1
                         )
 
-                # Forward pass
-                outputs = model(images)
-
                 # Apply label noise if enabled
                 if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.label:
                     targets = model.noise_regularizer.apply_label_noise(targets)
+
+                # Forward pass
+                outputs = model(images)
 
                 # Calculate loss
                 loss = model.criterion(outputs, targets)
@@ -248,6 +256,12 @@ def main(
                 # Backward and optimize
                 optimizer.zero_grad()
                 loss.backward()
+
+                # Restore original weights if permanent noise is not applied
+                if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.weight:
+                    permanent = False
+                    if not permanent:
+                        model.noise_regularizer.restore_weights(model)
 
                 # Apply gradient noise if enabled
                 if batch_idx % 50 == 0:  # Don't log too frequently

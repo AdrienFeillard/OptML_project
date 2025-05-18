@@ -14,6 +14,7 @@ class Classifier(str, Enum):
     mobilenet_v2 = "mobilenet_v2"
     googlenet = "googlenet"
     inception_v3 = "inception_v3"
+    simple_cnn = "simple_cnn"
 
 class LoggerType(str, Enum):
     tensorboard = "tensorboard"

@@ -9,210 +9,244 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 experiments_dir = f"experiments_{timestamp}"
 os.makedirs(experiments_dir, exist_ok=True)
 
+# Define experiment configurations
+# experiments = [
+#     # Experiment 1: No noise baseline
+#     {
+#         "name": "baseline",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "none",
+#             "--save-as", f"resnet18_baseline.pth"
+#         ] + common_args
+#     },
+#
+#     # Gradient Noise Experiments
+#     {
+#         "name": "gradient_noise_gaussian_low",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "gradient",
+#             "--noise-magnitude", "0.01",
+#             "--noise-distribution", "gaussian",
+#             "--noise-schedule", "constant",
+#             "--save-as", f"resnet18_grad_gauss_low.pth"
+#         ] + common_args
+#     },
+#     {
+#         "name": "gradient_noise_gaussian_medium",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "gradient",
+#             "--noise-magnitude", "0.05",
+#             "--noise-distribution", "gaussian",
+#             "--noise-schedule", "constant",
+#             "--save-as", f"resnet18_grad_gauss_med.pth"
+#         ] + common_args
+#     },
+#     {
+#         "name": "gradient_noise_uniform",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "gradient",
+#             "--noise-magnitude", "0.03",
+#             "--noise-distribution", "uniform",
+#             "--noise-schedule", "constant",
+#             "--save-as", f"resnet18_grad_uniform.pth"
+#         ] + common_args
+#     },
+#
+#     # Weight Noise Experiments
+#     {
+#         "name": "weight_noise_gaussian_low",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "weight",
+#             "--noise-magnitude", "0.01",
+#             "--noise-distribution", "gaussian",
+#             "--noise-schedule", "constant",
+#             "--save-as", f"resnet18_weight_gauss_low.pth"
+#         ] + common_args
+#     },
+#     {
+#         "name": "weight_noise_gaussian_medium",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "weight",
+#             "--noise-magnitude", "0.03",
+#             "--noise-distribution", "gaussian",
+#             "--noise-schedule", "constant",
+#             "--save-as", f"resnet18_weight_gauss_med.pth"
+#         ] + common_args
+#     },
+#     {
+#         "name": "weight_noise_uniform",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "weight",
+#             "--noise-magnitude", "0.02",
+#             "--noise-distribution", "uniform",
+#             "--noise-schedule", "constant",
+#             "--save-as", f"resnet18_weight_uniform.pth"
+#         ] + common_args
+#     },
+#
+#     # Input Noise Experiments
+#     {
+#         "name": "input_noise_gaussian_low",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "input",
+#             "--noise-magnitude", "0.01",
+#             "--noise-distribution", "gaussian",
+#             "--noise-schedule", "constant",
+#             "--save-as", f"resnet18_input_gauss_low.pth"
+#         ] + common_args
+#     },
+#     {
+#         "name": "input_noise_gaussian_medium",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "input",
+#             "--noise-magnitude", "0.05",
+#             "--noise-distribution", "gaussian",
+#             "--noise-schedule", "constant",
+#             "--save-as", f"resnet18_input_gauss_med.pth"
+#         ] + common_args
+#     },
+#     {
+#         "name": "input_noise_uniform",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "input",
+#             "--noise-magnitude", "0.03",
+#             "--noise-distribution", "uniform",
+#             "--noise-schedule", "constant",
+#             "--save-as", f"resnet18_input_uniform.pth"
+#         ] + common_args
+#     },
+#
+#     # Label Noise Experiments
+#     {
+#         "name": "label_noise_low",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "label",
+#             "--noise-magnitude", "0.01",  # 1% chance of label flip
+#             "--noise-schedule", "constant",
+#             "--save-as", f"resnet18_label_low.pth"
+#         ] + common_args
+#     },
+#     {
+#         "name": "label_noise_medium",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "label",
+#             "--noise-magnitude", "0.05",  # 5% chance of label flip
+#             "--noise-schedule", "constant",
+#             "--save-as", f"resnet18_label_med.pth"
+#         ] + common_args
+#     },
+#
+#     # Dropout Experiments
+#     {
+#         "name": "dropout_low",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "dropout",
+#             "--dropout-prob", "0.1",  # 10% dropout rate
+#             "--save-as", f"resnet18_dropout_low.pth"
+#         ] + common_args
+#     },
+#     {
+#         "name": "dropout_medium",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "dropout",
+#             "--dropout-prob", "0.3",  # 30% dropout rate
+#             "--save-as", f"resnet18_dropout_med.pth"
+#         ] + common_args
+#     },
+#
+#     # Different Noise Schedules (using gradient noise as an example)
+#     {
+#         "name": "gradient_noise_linear_decay",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "gradient",
+#             "--noise-magnitude", "0.05",
+#             "--noise-distribution", "gaussian",
+#             "--noise-schedule", "linear",
+#             "--save-as", f"resnet18_grad_linear.pth"
+#         ] + common_args
+#     },
+#     {
+#         "name": "gradient_noise_cosine_decay",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "gradient",
+#             "--noise-magnitude", "0.05",
+#             "--noise-distribution", "gaussian",
+#             "--noise-schedule", "cosine",
+#             "--save-as", f"resnet18_grad_cosine.pth"
+#         ] + common_args
+#     },
+#     {
+#         "name": "gradient_noise_exponential_decay",
+#         "args": [
+#             "--classifier", "resnet18",
+#             "--noise-type", "gradient",
+#             "--noise-magnitude", "0.05",
+#             "--noise-distribution", "gaussian",
+#             "--noise-schedule", "exponential",
+#             "--save-as", f"resnet18_grad_exp.pth"
+#         ] + common_args
+#     }
+#   ]
+
+experiments = []
+
 common_args = [
     "--data-dir", "./data/cifar10",
     "--batch-size", "128",
-    "--epochs", "100",            # Reduced from 100 to make experiments faster
+    "--epochs", "100",
     "--workers", "4",
-    "--subset", "1.0",          # Use full dataset
     "--lr", "1e-2",
-    "--wd", "1e-2",
+    "--wd", "1e-3",
 ]
 
-# Define experiment configurations
-experiments = [
-    # Experiment 1: No noise baseline
-    {
-        "name": "baseline",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "none",
-            "--save-as", f"resnet18_baseline.pth"
-        ] + common_args
-    },
+models = ['simple_cnn', 'resnet18']
+noise_types = ['weight', 'gradient', 'input']
+subset = [0.1, 0.5, 1.0]
+noise_magnitudes = [0.01, 0.05, 0.1]
 
-    # Gradient Noise Experiments
-    {
-        "name": "gradient_noise_gaussian_low",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "gradient",
-            "--noise-magnitude", "0.01",
-            "--noise-distribution", "gaussian",
-            "--noise-schedule", "constant",
-            "--save-as", f"resnet18_grad_gauss_low.pth"
-        ] + common_args
-    },
-    {
-        "name": "gradient_noise_gaussian_medium",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "gradient",
-            "--noise-magnitude", "0.05",
-            "--noise-distribution", "gaussian",
-            "--noise-schedule", "constant",
-            "--save-as", f"resnet18_grad_gauss_med.pth"
-        ] + common_args
-    },
-    {
-        "name": "gradient_noise_uniform",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "gradient",
-            "--noise-magnitude", "0.03",
-            "--noise-distribution", "uniform",
-            "--noise-schedule", "constant",
-            "--save-as", f"resnet18_grad_uniform.pth"
-        ] + common_args
-    },
+for model in models:
+    for noise in noise_types:
+        for sub in subset:
+            args = [
+                   "--classifier", model,
+                   "--noise-type", "none",
+                   "--save-as", f"{model}_{sub}_baseline.pth",
+                   "--subset", str(sub)
+               ] + common_args
+            experiments.append({
+                "name": f"{model}_{sub}_baseline",
+                "args": args
+            })
+            for noise_magnitude in noise_magnitudes:
+                args = [
+                    "--classifier", model,
+                    "--noise-type", noise,
+                    "--noise-magnitude", str(noise_magnitude),
+                    "--save-as", f"{model}_{noise}_{noise_magnitude}_{sub}.pth",
+                    "--subset", str(sub)
+                ] + common_args
 
-    # Weight Noise Experiments
-    {
-        "name": "weight_noise_gaussian_low",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "weight",
-            "--noise-magnitude", "0.01",
-            "--noise-distribution", "gaussian",
-            "--noise-schedule", "constant",
-            "--save-as", f"resnet18_weight_gauss_low.pth"
-        ] + common_args
-    },
-    {
-        "name": "weight_noise_gaussian_medium",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "weight",
-            "--noise-magnitude", "0.03",
-            "--noise-distribution", "gaussian",
-            "--noise-schedule", "constant",
-            "--save-as", f"resnet18_weight_gauss_med.pth"
-        ] + common_args
-    },
-    {
-        "name": "weight_noise_uniform",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "weight",
-            "--noise-magnitude", "0.02",
-            "--noise-distribution", "uniform",
-            "--noise-schedule", "constant",
-            "--save-as", f"resnet18_weight_uniform.pth"
-        ] + common_args
-    },
+                experiments.append({
+                    "name": f"{model}_{noise}_{noise_magnitude}_{sub}",
+                    "args": args
+                })
 
-    # Input Noise Experiments
-    {
-        "name": "input_noise_gaussian_low",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "input",
-            "--noise-magnitude", "0.01",
-            "--noise-distribution", "gaussian",
-            "--noise-schedule", "constant",
-            "--save-as", f"resnet18_input_gauss_low.pth"
-        ] + common_args
-    },
-    {
-        "name": "input_noise_gaussian_medium",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "input",
-            "--noise-magnitude", "0.05",
-            "--noise-distribution", "gaussian",
-            "--noise-schedule", "constant",
-            "--save-as", f"resnet18_input_gauss_med.pth"
-        ] + common_args
-    },
-    {
-        "name": "input_noise_uniform",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "input",
-            "--noise-magnitude", "0.03",
-            "--noise-distribution", "uniform",
-            "--noise-schedule", "constant",
-            "--save-as", f"resnet18_input_uniform.pth"
-        ] + common_args
-    },
-
-    # Label Noise Experiments
-    {
-        "name": "label_noise_low",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "label",
-            "--noise-magnitude", "0.01",  # 1% chance of label flip
-            "--noise-schedule", "constant",
-            "--save-as", f"resnet18_label_low.pth"
-        ] + common_args
-    },
-    {
-        "name": "label_noise_medium",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "label",
-            "--noise-magnitude", "0.05",  # 5% chance of label flip
-            "--noise-schedule", "constant",
-            "--save-as", f"resnet18_label_med.pth"
-        ] + common_args
-    },
-
-    # Dropout Experiments
-    {
-        "name": "dropout_low",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "dropout",
-            "--dropout-prob", "0.1",  # 10% dropout rate
-            "--save-as", f"resnet18_dropout_low.pth"
-        ] + common_args
-    },
-    {
-        "name": "dropout_medium",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "dropout",
-            "--dropout-prob", "0.3",  # 30% dropout rate
-            "--save-as", f"resnet18_dropout_med.pth"
-        ] + common_args
-    },
-
-    # Different Noise Schedules (using gradient noise as an example)
-    {
-        "name": "gradient_noise_linear_decay",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "gradient",
-            "--noise-magnitude", "0.05",
-            "--noise-distribution", "gaussian",
-            "--noise-schedule", "linear",
-            "--save-as", f"resnet18_grad_linear.pth"
-        ] + common_args
-    },
-    {
-        "name": "gradient_noise_cosine_decay",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "gradient",
-            "--noise-magnitude", "0.05",
-            "--noise-distribution", "gaussian",
-            "--noise-schedule", "cosine",
-            "--save-as", f"resnet18_grad_cosine.pth"
-        ] + common_args
-    },
-    {
-        "name": "gradient_noise_exponential_decay",
-        "args": [
-            "--classifier", "resnet18",
-            "--noise-type", "gradient",
-            "--noise-magnitude", "0.05",
-            "--noise-distribution", "gaussian",
-            "--noise-schedule", "exponential",
-            "--save-as", f"resnet18_grad_exp.pth"
-        ] + common_args
-    }
-]
 
 # Create experiment log file
 log_file = os.path.join(experiments_dir, "experiments_log.json")

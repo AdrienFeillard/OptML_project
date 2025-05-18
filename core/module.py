@@ -8,6 +8,7 @@ from rich import box
 # Add current directory to path to ensure imports work properly
 import sys
 import os
+
 sys.path.append(os.getcwd())
 
 from .cifar10_models.densenet import densenet121, densenet161, densenet169
@@ -16,6 +17,7 @@ from .cifar10_models.inception import inception_v3
 from .cifar10_models.mobilenetv2 import mobilenet_v2
 from .cifar10_models.resnet import resnet18, resnet34, resnet50
 from .cifar10_models.vgg import vgg11_bn, vgg13_bn, vgg16_bn, vgg19_bn
+from .cifar10_models.SimpleCNN import simple_cnn
 from .schduler import WarmupCosineLR
 from .noise_regularization import NoiseType, NoiseRegularizer, NoiseDistribution
 
@@ -44,6 +46,7 @@ all_classifiers = {
     "mobilenet_v2": mobilenet_v2(),
     "googlenet": googlenet(),
     "inception_v3": inception_v3(),
+    "simple_cnn": simple_cnn()
 }
 
 # Architecture information
