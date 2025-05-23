@@ -225,7 +225,7 @@ noise_layer_config = ["layer4.", "conv1", "bias"] # 1: layer4., 2: conv1, 3: bia
 subset = [0.4, 1.0]
 noise_magnitudes = [0.01]#, 0.05]
 momentum = [0, 0.9]
-noise_schedules = #TODO CHECK avec l'experience en cours #[NoiseSchedule.constant, NoiseSchedule.linear, NoiseSchedule.cosine, NoiseSchedule.exponential]
+noise_schedules =[NoiseSchedule.exponential] #TODO CHECK avec l'experience en cours #[NoiseSchedule.constant, NoiseSchedule.linear, NoiseSchedule.cosine, NoiseSchedule.exponential]
 
 for model in models:
     for momentum in momentum:

@@ -198,7 +198,7 @@ class CIFAR10Module(nn.Module):
                 lr=self.args.learning_rate,
                 weight_decay=self.args.weight_decay,
                 momentum=self.args.momentum,
-                nesterov=True,
+                nesterov=(self.args.momentum > 0),
             )
         elif self.args.optimizer == "adam":
 
