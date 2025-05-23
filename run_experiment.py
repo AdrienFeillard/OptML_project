@@ -4,6 +4,10 @@ import os
 import json
 from datetime import datetime
 
+from sympy.physics.units import momentum
+
+from core.noise_regularization import NoiseSchedule
+
 # Create experiments directory for results
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 experiments_dir = f"experiments_{timestamp}"
@@ -215,37 +219,47 @@ common_args = [
     "--wd", "1e-3",
 ]
 
-models = ['simple_cnn', 'resnet18']
-noise_types = ['weight', 'gradient', 'input']
-subset = [0.1, 0.5, 1.0]
-noise_magnitudes = [0.01, 0.05, 0.1]
+models = ['resnet18']#['simple_cnn', 'resnet18']
+noise_types = ['weight', 'gradient']
+noise_layer_config = ["layer4.", "conv1", "bias"] # 1: layer4., 2: conv1, 3: bias
+subset = [0.4, 1.0]
+noise_magnitudes = [0.01]#, 0.05]
+momentum = [0, 0.9]
+noise_schedules = #TODO CHECK avec l'experience en cours #[NoiseSchedule.constant, NoiseSchedule.linear, NoiseSchedule.cosine, NoiseSchedule.exponential]
 
 for model in models:
-    for noise in noise_types:
-        for sub in subset:
-            args = [
-                   "--classifier", model,
-                   "--noise-type", "none",
-                   "--save-as", f"{model}_{sub}_baseline.pth",
-                   "--subset", str(sub)
-               ] + common_args
-            experiments.append({
-                "name": f"{model}_{sub}_baseline",
-                "args": args
-            })
-            for noise_magnitude in noise_magnitudes:
+    for momentum in momentum:
+        for noise in noise_types:
+            for sub in subset:
                 args = [
-                    "--classifier", model,
-                    "--noise-type", noise,
-                    "--noise-magnitude", str(noise_magnitude),
-                    "--save-as", f"{model}_{noise}_{noise_magnitude}_{sub}.pth",
-                    "--subset", str(sub)
-                ] + common_args
-
+                       "--classifier", model,
+                       "--noise-type", "none",
+                       "--momentum", str(momentum),
+                       "--save-as", f"{model}_{sub}_baseline.pth",
+                       "--subset", str(sub)
+                   ] + common_args
                 experiments.append({
-                    "name": f"{model}_{noise}_{noise_magnitude}_{sub}",
+                    "name": f"{model}_{sub}_baseline",
                     "args": args
                 })
+                for noise_magnitude in noise_magnitudes:
+                    for noise_schedule in noise_schedules:
+                        for noise_layer in noise_layer_config:
+                            args = [
+                                "--classifier", model,
+                                "--noise-type", noise,
+                                "--momentum", str(momentum),
+                                "--noise-magnitude", str(noise_magnitude),
+                                "--noise-schedule", noise_schedule,
+                                "--noise-layer", noise_layer,
+                                "--save-as", f"{model}_{sub}_{noise}_{noise_magnitude}_{noise_schedule}.pth",
+                                "--subset", str(sub)
+                            ] + common_args
+
+                            experiments.append({
+                                "name": f"{model}_{sub}_{noise}_{noise_magnitude}_{noise_schedule}",
+                                "args": args
+                            })
 
 
 # Create experiment log file

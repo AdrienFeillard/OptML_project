@@ -187,6 +187,8 @@ class NoiseRegularizer:
         for name, param in model.named_parameters():
             if (param.requires_grad and
                     (not self.apply_to_layers or any(layer_name in name for layer_name in self.apply_to_layers))):
+
+                print("GRAD HOOK REGISTERED FOR", name)
                 param.register_hook(add_noise_to_grad(name))
                 total_hooks += 1
 

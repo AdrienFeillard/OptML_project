@@ -1,3 +1,5 @@
+from enum import Enum
+
 import torch
 import torch.nn as nn
 from rich.console import Console
@@ -66,6 +68,10 @@ architecture_info = {
     "inception_v3": {"type": "Inception", "layers": "-", "params": "27.2M", "description": "Inception v3"},
 }
 
+class Optimizer(str, Enum):
+    SGD = "sgd"
+    Adam = "adam"
+
 class CIFAR10Module(nn.Module):
     def __init__(self, args):
         super().__init__()
@@ -115,7 +121,7 @@ class CIFAR10Module(nn.Module):
                 magnitude=args.noise_magnitude,
                 schedule=args.noise_schedule,
                 max_epochs=args.max_epochs,
-                apply_to_layers=args.noise_layers.split(',') if args.noise_layers else None,
+                apply_to_layers=args.noise_layer,
                 noise_distribution=noise_distribution
             )
 
@@ -180,13 +186,35 @@ class CIFAR10Module(nn.Module):
 
     def configure_optimizer(self):
         # Create optimizer with momentum
-        optimizer = torch.optim.SGD(
-            self.parameters(),
-            lr=self.args.learning_rate,
-            weight_decay=self.args.weight_decay,
-            momentum=0.9,
-            nesterov=True,
-        )
+
+        if self.args.optimizer == "sgd":
+            print("Using SGD optimizer")
+            print("momentum: ", self.args.momentum)
+            print("weight_decay: ", self.args.weight_decay)
+            print("learning_rate: ", self.args.learning_rate)
+
+            optimizer = torch.optim.SGD(
+                self.parameters(),
+                lr=self.args.learning_rate,
+                weight_decay=self.args.weight_decay,
+                momentum=self.args.momentum,
+                nesterov=True,
+            )
+        elif self.args.optimizer == "adam":
+
+            print("Using Adam optimizer")
+            print("learning_rate: ", self.args.learning_rate)
+            print("weight_decay: ", self.args.weight_decay)
+            print("beta1: ", self.args.beta1)
+            print("beta2: ", self.args.beta2)
+
+            optimizer = torch.optim.Adam(
+                self.parameters(),
+                lr=self.args.learning_rate,
+                weight_decay=self.args.weight_decay,
+                betas=(self.args.beta1, self.args.beta2),
+
+            )
 
         # Calculate total steps for the scheduler (approximate for CIFAR-10)
         total_steps = self.args.max_epochs * 50000 // self.args.batch_size

@@ -4,7 +4,7 @@ import datetime
 import typer
 import torch
 #import torch_directml
-from typing import Optional
+from typing import Optional, List
 from rich.console import Console
 from rich.panel import Panel
 from rich.live import Live
@@ -18,6 +18,7 @@ from utils.metrics import TrainingMetrics
 from utils.visualization import create_dashboard, visualize_lr_schedule
 from utils.configs.config import Classifier, LoggerType, NoiseDistribution
 from core.noise_regularization import NoiseType, NoiseSchedule
+from core.module import Optimizer
 # Install rich traceback handler
 install_rich_traceback(show_locals=True)
 
@@ -39,7 +40,7 @@ def main(
 
         # Optimizer configuration
         learning_rate: float = typer.Option(1e-2, "--lr", help="Initial learning rate"),
-        weight_decay: float = typer.Option(1e-2, "--wd", help="Weight decay"),
+        weight_decay: float = typer.Option(1e-3, "--wd", help="Weight decay"),
         visualize_lr: bool = typer.Option(False, "--visualize-lr", help="Visualize learning rate schedule"),
 
         # Device configuration
@@ -52,9 +53,13 @@ def main(
         noise_type: NoiseType = typer.Option(NoiseType.none, "--noise-type", help="Type of noise regularization to apply"),
         noise_magnitude: float = typer.Option(0.01, "--noise-magnitude", help="Initial magnitude of noise"),
         noise_schedule: NoiseSchedule = typer.Option(NoiseSchedule.constant, "--noise-schedule", help="Schedule for noise magnitude over time"),
-        noise_layers: str = typer.Option(None, "--noise-layers", help="Comma-separated list of layer names to apply noise to (default: all layers)"),
+        noise_layer: List[str] = typer.Option(None, "--noise-layer",help="List of layer names to apply noise to (default: all layers). Example of use : --noise-layers conv1 --noise-layers conv2'"),
         noise_distribution: NoiseDistribution = typer.Option(NoiseDistribution.gaussian, "--noise-distribution", help="Distribution of noise (gaussian or uniform)"),
 
+        optimizer: Optimizer = typer.Option(Optimizer.SGD, "--optimizer", "-o", help="Optimizer to use"),
+        momentum: float = typer.Option(0.9, "--momentum", help="Momentum for SGD optimizer"),
+        beta1: float = typer.Option(0.9, "--beta1", help="Beta1 for Adam optimizer"),
+        beta2: float = typer.Option(0.999, "--beta2", help="Beta2 for Adam optimizer"),
 ):
     # Convert to args-like object for compatibility with existing code
     class Args:
@@ -72,11 +77,20 @@ def main(
     args.gpu_id = gpu_id
     args.learning_rate = learning_rate
     args.weight_decay = weight_decay
+
+    # Noise settings
     args.noise_type = noise_type
     args.noise_magnitude = noise_magnitude
     args.noise_schedule = noise_schedule
-    args.noise_layers = noise_layers
+    args.noise_layer = noise_layer
     args.noise_distribution = noise_distribution
+
+    # Optimizer settings
+    args.optimizer = optimizer
+    args.momentum = momentum
+    args.beta1 = beta1
+    args.beta2 = beta2
+
     args.subset = subset
     args.test_phase = False
     # Initialize metrics and log handler
