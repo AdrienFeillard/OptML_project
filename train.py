@@ -122,13 +122,13 @@ def main(
         log_handler.log("SYSTEM", "Falling back to CPU")
 
         if torch.cuda.is_available():
-            device = "cuda"
+            device = torch.device("cuda")
             print("CUDA USED")
         elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
-            device = "mps"
+            device = torch.device("mps")
             print("MPS USED")
         else:
-            device = "cpu"
+            device = torch.device("cpu")
             print("CPU USED")
 
     # Download pre-trained weights if requested
