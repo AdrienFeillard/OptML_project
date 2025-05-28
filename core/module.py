@@ -19,7 +19,7 @@ from .cifar10_models.inception import inception_v3
 from .cifar10_models.mobilenetv2 import mobilenet_v2
 from .cifar10_models.resnet import resnet18, resnet34, resnet50
 from .cifar10_models.vgg import vgg11_bn, vgg13_bn, vgg16_bn, vgg19_bn
-from .cifar10_models.SimpleCNN import simple_cnn, tiny_cnn
+from .cifar10_models.SimpleCNN import simple_cnn, tiny_cnn, baby_cnn
 from .schduler import WarmupCosineLR
 from .noise_regularization import NoiseType, NoiseRegularizer, NoiseDistribution
 
@@ -49,7 +49,8 @@ all_classifiers = {
     "googlenet": googlenet(),
     "inception_v3": inception_v3(),
     "simple_cnn": simple_cnn(),
-    "tiny_cnn": tiny_cnn()
+    "tiny_cnn": tiny_cnn(),
+    "baby_cnn": baby_cnn()
 }
 
 # Architecture information

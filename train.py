@@ -196,9 +196,15 @@ def main(
     )
 
     # Start training with live display
-    with Live(dashboard, refresh_per_second=0.1) as live:
+    with (Live(dashboard, refresh_per_second=0.1) as live):
         best_acc = 0.0
         start_time = time.time()
+
+        # Parameters for noise regularization
+        is_stuck = False
+        patience = 0
+        best_loss = float('inf')
+
 
         for epoch in range(args.max_epochs):
             epoch_start_time = time.time()
@@ -218,6 +224,7 @@ def main(
                     epoch=epoch+1
                 )
                 log_handler.log("NOISE", f"Applying {model.noise_regularizer.noise_type} noise with magnitude {model.noise_regularizer.current_magnitude:.6f}")
+
             train_loss = 0.0
             train_correct = 0
             train_total = 0
@@ -232,7 +239,7 @@ def main(
                 images, targets = images.to(device), targets.to(device)
 
                 # Apply weight noise if enabled
-                if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.weight:
+                if is_stuck and hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.weight:
 
                     permanent = False
 
@@ -272,7 +279,7 @@ def main(
                 loss.backward()
 
                 # Restore original weights if permanent noise is not applied
-                if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.weight:
+                if is_stuck and hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.weight:
                     permanent = False
                     if not permanent:
                         model.noise_regularizer.restore_weights(model)
@@ -282,7 +289,7 @@ def main(
                     grad_norms_before = training_metrics.log_gradient_norms(model, epoch+1, batch_idx)
 
                 # After applying gradient noise:
-                if hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.gradient:
+                if is_stuck and hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.gradient:
                     model.noise_regularizer.apply_gradient_noise(model)
 
                     # Log gradient norms after noise application
@@ -342,6 +349,22 @@ def main(
                         f"Loss: {batch_loss:.4f}, Acc: {batch_acc:.2f}%, "
                         f"LR: {current_lr:.6f}, Time: {batch_time:.2f}s"
                     )
+
+            # Check if loss has plateaued
+            print("loss : ", train_loss)
+            if train_loss < best_loss: #TODO tester last a la place de best_loss
+                best_loss = train_loss
+                print("noise deactivated")
+                patience = 0
+                is_stuck = False
+            else:
+                patience += 1
+                print("patience = ", patience)
+
+                if patience > 5:
+                    print("noise activated")
+                    is_stuck = True
+
 
             # Validation phase
             model.eval()

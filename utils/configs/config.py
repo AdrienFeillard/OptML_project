@@ -16,6 +16,7 @@ class Classifier(str, Enum):
     inception_v3 = "inception_v3"
     simple_cnn = "simple_cnn"
     tiny_cnn = "tiny_cnn"
+    baby_cnn = "baby_cnn"
 
 class LoggerType(str, Enum):
     tensorboard = "tensorboard"
