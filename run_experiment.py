@@ -79,7 +79,7 @@ common_args = [
 
 # List of parameter combinations for experiments
 models = ['baby_cnn']#['baby_cnn', 'tiny_cnn', 'simple_cnn', 'resnet18']
-subset = [1.0]
+subset = [0.01]
 
 # Optimizer parameters
 optimizers = ['sgd', 'adam']
@@ -91,7 +91,7 @@ betas2 = [0.999]
 noise_types = ['weight', 'gradient']
 noise_layer_config = [None] #["layer4.", "conv1", "bias"]
 noise_magnitudes = [0.01, 0.05]
-noise_distribution = ['normal'] #['normal', 'uniform']
+noise_distribution = ['gaussian'] #['normal', 'uniform']
 noise_schedules = [NoiseSchedule.cosine, NoiseSchedule.exponential]
 
 # Noise application parameters
