@@ -128,8 +128,8 @@ class CIFAR10Module(nn.Module):
             )
 
             # Register gradient hooks if using gradient noise
-            if args.noise_type == NoiseType.gradient:
-                self.noise_regularizer.register_gradient_noise_hook(self)
+            #if args.noise_type == NoiseType.gradient:
+                #self.noise_regularizer.register_gradient_noise_hook(self)
 
         # Print model layers summary
         self._print_model_summary()
@@ -168,21 +168,21 @@ class CIFAR10Module(nn.Module):
         console.print(layer_table)
 
     def forward(self, images):
-        # Apply input noise if configured
-        if hasattr(self, 'noise_regularizer') and self.noise_regularizer and self.noise_regularizer.noise_type == NoiseType.input:
-            images = self.noise_regularizer.apply_input_noise(images)
-
-        # Apply weight noise if configured (temporary during forward pass)
-        if hasattr(self, 'noise_regularizer') and self.noise_regularizer and self.noise_regularizer.noise_type == NoiseType.weight:
-            self.noise_regularizer.save_original_weights(self)
-            self.noise_regularizer.apply_weight_noise(self, permanent=False)
+        # # Apply input noise if configured
+        # if hasattr(self, 'noise_regularizer') and self.noise_regularizer and self.noise_regularizer.noise_type == NoiseType.input:
+        #     images = self.noise_regularizer.apply_input_noise(images)
+        #
+        # # Apply weight noise if configured (temporary during forward pass)
+        # if hasattr(self, 'noise_regularizer') and self.noise_regularizer and self.noise_regularizer.noise_type == NoiseType.weight:
+        #     self.noise_regularizer.save_original_weights(self)
+        #     self.noise_regularizer.apply_weight_noise(self, permanent=False)
 
         # Forward pass through the model
         outputs = self.model(images)
 
-        # Restore original weights if we applied weight noise
-        if hasattr(self, 'noise_regularizer') and self.noise_regularizer and self.noise_regularizer.noise_type == NoiseType.weight:
-            self.noise_regularizer.restore_weights(self)
+        # # Restore original weights if we applied weight noise
+        # if hasattr(self, 'noise_regularizer') and self.noise_regularizer and self.noise_regularizer.noise_type == NoiseType.weight:
+        #     self.noise_regularizer.restore_weights(self)
 
         return outputs
 

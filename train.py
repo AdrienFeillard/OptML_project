@@ -50,16 +50,20 @@ def main(
         checkpoint_name: str = typer.Option("none.pth", "--save-as", help="Custom filename to save checkpoint (default: {classifier}_best.pth)"),
 
         # Noise regularization
-        noise_type: NoiseType = typer.Option(NoiseType.none, "--noise-type", help="Type of noise regularization to apply"),
-        noise_magnitude: float = typer.Option(0.01, "--noise-magnitude", help="Initial magnitude of noise"),
-        noise_schedule: NoiseSchedule = typer.Option(NoiseSchedule.constant, "--noise-schedule", help="Schedule for noise magnitude over time"),
-        noise_layer: List[str] = typer.Option(None, "--noise-layer",help="List of layer names to apply noise to (default: all layers). Example of use : --noise-layers conv1 --noise-layers conv2'"),
-        noise_distribution: NoiseDistribution = typer.Option(NoiseDistribution.gaussian, "--noise-distribution", help="Distribution of noise (gaussian or uniform)"),
+        noise_type: NoiseType = typer.Option(NoiseType.none, "--noise-type", "-nt", help="Type of noise regularization to apply"),
+        noise_magnitude: float = typer.Option(0.01, "--noise-magnitude", "-nm", help="Initial magnitude of noise"),
+        noise_schedule: NoiseSchedule = typer.Option(NoiseSchedule.constant, "--noise-schedule", "-ns", help="Schedule for noise magnitude over time"),
+        noise_layer: List[str] = typer.Option(None, "--noise-layer", "-nl", help="List of layer names to apply noise to (default: all layers). Example of use : --noise-layers conv1 --noise-layers conv2'"),
+        noise_distribution: NoiseDistribution = typer.Option(NoiseDistribution.gaussian, "--noise-distribution", "-nd", help="Distribution of noise (gaussian or uniform)"),
 
         optimizer: Optimizer = typer.Option(Optimizer.SGD, "--optimizer", "-o", help="Optimizer to use"),
-        momentum: float = typer.Option(0.9, "--momentum", help="Momentum for SGD optimizer"),
-        beta1: float = typer.Option(0.9, "--beta1", help="Beta1 for Adam optimizer"),
-        beta2: float = typer.Option(0.999, "--beta2", help="Beta2 for Adam optimizer"),
+        momentum: float = typer.Option(0.9, "--momentum", "-m", help="Momentum for SGD optimizer"),
+        beta1: float = typer.Option(0.9, "--beta1", "-b1", help="Beta1 for Adam optimizer"),
+        beta2: float = typer.Option(0.999, "--beta2", "-b2",help="Beta2 for Adam optimizer"),
+
+        permanent: bool = typer.Option(False, "--permanent", "-p", help="Apply permanent noise to weights (default: False)"),
+        noise_during_stuck_only: bool = typer.Option(False, "--noise-during-stuck-only", "-so", help="Apply noise only when training is stuck (default: False)"),
+        patience: int = typer.Option(5, "--patience", help="Number of epochs to wait before applying noise when training is stuck"),
 ):
     # Convert to args-like object for compatibility with existing code
     class Args:
@@ -90,6 +94,11 @@ def main(
     args.momentum = momentum
     args.beta1 = beta1
     args.beta2 = beta2
+
+    # Additional noise settings
+    args.permanent = permanent
+    args.noise_during_stuck_only = noise_during_stuck_only
+    args.patience = patience
 
     args.subset = subset
     args.test_phase = False
@@ -201,7 +210,7 @@ def main(
         start_time = time.time()
 
         # Parameters for noise regularization
-        is_stuck = False
+        is_stuck = not noise_during_stuck_only # if not only during stuck, we always apply noise => as if if was always stuck
         patience = 0
         best_loss = float('inf')
 
@@ -241,15 +250,15 @@ def main(
                 # Apply weight noise if enabled
                 if is_stuck and hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.weight:
 
-                    permanent = False
-
-                    if not permanent:
+                    # if the noise is permanently applied, we do not save the original weights
+                    if not args.permanent:
                         model.noise_regularizer.save_original_weights(model)
 
                     # Log weight norms before noise application
                     weight_norms_before = training_metrics.log_weight_norms(model, epoch+1, batch_idx)
 
-                    model.noise_regularizer.apply_weight_noise(model, permanent=permanent)
+                    # Apply weight noise
+                    model.noise_regularizer.apply_weight_noise(model, permanent=args.permanent)
 
                     # Log weight norms after noise application
                     weight_norms_after = training_metrics.log_weight_norms(model, epoch+1, batch_idx)
@@ -280,8 +289,8 @@ def main(
 
                 # Restore original weights if permanent noise is not applied
                 if is_stuck and hasattr(model, 'noise_regularizer') and model.noise_regularizer and model.noise_regularizer.noise_type == NoiseType.weight:
-                    permanent = False
-                    if not permanent:
+                    args.permanent = False
+                    if not args.permanent:
                         model.noise_regularizer.restore_weights(model)
 
                 # Apply gradient noise if enabled
@@ -351,19 +360,23 @@ def main(
                     )
 
             # Check if loss has plateaued
-            print("loss : ", train_loss)
-            if train_loss < best_loss: #TODO tester last a la place de best_loss
-                best_loss = train_loss
-                print("noise deactivated")
-                patience = 0
-                is_stuck = False
-            else:
-                patience += 1
-                print("patience = ", patience)
+            if (args.noise_during_stuck_only):
+                print("loss : ", train_loss)
+                # If the loss has improved, reset patience and deactivate noise
+                if train_loss < best_loss: #TODO tester last a la place de best_loss
+                    best_loss = train_loss
+                    print("noise deactivated")
+                    patience = 0
+                    is_stuck = False
+                else:
+                    # If the loss has not improved, increase patience
+                    patience += 1
+                    print("patience = ", patience)
 
-                if patience > 5:
-                    print("noise activated")
-                    is_stuck = True
+                    # If patience exceeded, assume training is stuck and activate noise
+                    if patience > args.patience:
+                        print("noise activated")
+                        is_stuck = True
 
 
             # Validation phase
