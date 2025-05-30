@@ -1,6 +1,7 @@
 import os
 import zipfile
 
+import numpy as np
 import requests
 import torch
 from torch.utils.data import DataLoader
@@ -12,6 +13,7 @@ from rich.progress import Progress, TextColumn, BarColumn, DownloadColumn, Trans
 from rich.panel import Panel
 
 from torch.utils.data import Subset
+from sklearn.model_selection import StratifiedShuffleSplit
 
 # Initialize Rich console
 console = Console()
@@ -167,12 +169,26 @@ class CIFAR10Data:
 
     def train_dataloader(self):
         if self.subset < 1.0:
-            subset_size = int(len(self.train_dataset) * self.subset)
-            indices = torch.randperm(len(self.train_dataset)).tolist()[:subset_size]
-            subset_train_dataset = Subset(self.train_dataset, indices)
-            dataset = subset_train_dataset
+            # subset_size = int(len(self.train_dataset) * self.subset)
+            # indices = torch.randperm(len(self.train_dataset)).tolist()[:subset_size]
+            # subset_train_dataset = Subset(self.train_dataset, indices)
+            # dataset = subset_train_dataset
+
+            targets = np.array(self.train_dataset.targets)  # Assure-toi que .targets existe
+            sss = StratifiedShuffleSplit(n_splits=1, train_size=self.subset, random_state=42)
+            indices, _ = next(sss.split(np.zeros(len(targets)), targets))
+            dataset = Subset(self.train_dataset, indices)
         else:
             dataset = self.train_dataset
+
+        dict = {}
+        for i in range(10):
+            dict[i] = 0
+
+        for a, b in dataset:
+            dict[b] += 1
+
+        print('Number of classes per label :',dict)
 
         return DataLoader(
             dataset,

@@ -79,7 +79,7 @@ common_args = [
 
 # List of parameter combinations for experiments
 models = ['baby_cnn']#['baby_cnn', 'tiny_cnn', 'simple_cnn', 'resnet18']
-subset = [0.01]
+subset = [1.0]
 
 # Optimizer parameters
 optimizers = ['sgd', 'adam']
