@@ -13,6 +13,7 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 experiments_dir = f"experiments_{timestamp}"
 os.makedirs(experiments_dir, exist_ok=True)
 
+
 def run_baseline(model, sub, opti, momentum, beta1, beta2):
     """
     Function to run a baseline experiment without noise.
@@ -20,18 +21,19 @@ def run_baseline(model, sub, opti, momentum, beta1, beta2):
 
     # Add baseline experiment
     args = [
-               "--classifier", model,
-               "--noise-type", "none",
-               "--save-as", f"{model}_{sub}_{opti}_baseline.pth",
-               "--subset", str(sub),
-               "--optimizer", opti,
-               "--momentum", str(momentum),
-               "--beta1", str(beta1),
-               "--beta2", str(beta2),
-               "--lr", ("1e-3" if opti == 'adam' else "1e-3"),
-           ]
+        "--classifier", model,
+        "--noise-type", "none",
+        "--save-as", f"{model}_{sub}_{opti}_baseline.pth",
+        "--subset", str(sub),
+        "--optimizer", opti,
+        "--momentum", str(momentum),
+        "--beta1", str(beta1),
+        "--beta2", str(beta2),
+        "--lr", ("1e-3" if opti == 'adam' else "1e-3"),
+    ]
 
     return args
+
 
 def run_noise_experiment(model, sub, opti, momentum, beta1, beta2,
                          noise, noise_distrib, noise_magnitude, noise_schedule, noise_layer,
@@ -43,7 +45,7 @@ def run_noise_experiment(model, sub, opti, momentum, beta1, beta2,
     # Add noise experiments
     args = [
         "--classifier", model,
-        "--noise-type", noise,
+        "--noise-type", str(noise),
         "--noise-distribution", noise_distrib,  # Assuming normal distribution for noise
         "--noise-magnitude", str(noise_magnitude),
         "--noise-schedule", noise_schedule,
@@ -53,7 +55,7 @@ def run_noise_experiment(model, sub, opti, momentum, beta1, beta2,
         "--momentum", str(momentum),
         "--beta1", str(beta1),
         "--beta2", str(beta2),
-        "--lr", ("1e-3" if opti == 'adam' else "1e-2"),
+        "--lr", ("1e-3" if opti == 'adam' else "1e-3"),
         "--patience", str(patience),
     ]
 
@@ -67,39 +69,48 @@ def run_noise_experiment(model, sub, opti, momentum, beta1, beta2,
 
     return args
 
-experiments = []
 
-common_args = [
-    "--data-dir", "./data/cifar10",
-    "--batch-size", "128",
-    "--epochs", "200",
-    "--workers", "4",
-    "--wd", "1e-4",
-]
+"""experiments = []
+
+
 
 # List of parameter combinations for experiments
-models = ['baby_cnn']#['baby_cnn', 'tiny_cnn', 'simple_cnn', 'resnet18']
+models = ['baby_cnn']#['resnet18','baby_cnn', 'tiny_cnn', 'simple_cnn', 'resnet18']
 subset = [1.0]
 
 # Optimizer parameters
-optimizers = ['sgd', 'adam']
-momentums = [0, 0.9]
-betas1 = [0, 0.9]
-betas2 = [0.999]
+optimizers = ['sgd']#, 'adam']
+momentums = [0]#, 0.9]
+#betas1 = [0, 0.9]
+#betas2 = [0.999]
 
 # Noise type parameters
-noise_types = ['weight', 'gradient']
+noise_types =['gradient']# ['weight', 'gradient']
 noise_layer_config = [None] #["layer4.", "conv1", "bias"]
-noise_magnitudes = [0.01, 0.05]
+noise_magnitudes = [0.01]#, 0.05]
 noise_distribution = ['gaussian'] #['normal', 'uniform']
-noise_schedules = [NoiseSchedule.cosine, NoiseSchedule.exponential]
+noise_schedules = [NoiseSchedule.cosine]#, NoiseSchedule.exponential]
 
 # Noise application parameters
 
 permanent = [False] # TODO Test
-noise_during_stuck_only = [True, False]
+noise_during_stuck_only = [True] #[True, False]
 patience = 5
+common_args = [
+    "--data-dir", "./data/cifar10",
+    "--batch-size", "128",
+    "--epochs", "200", # Reduced epochs for faster testing
+    "--workers", "4",
+    "--wd", "1e-4",
 
+    "--flag-min-epochs", "1", # Start checking flags from epoch 1
+    "--flag-window-size", "3", # Use a small window for quicker triggering
+    "--flag-plateau-delta", "1e-3", # Aggressive plateau delta
+    "--flag-overfit-epochs", "1", # Overfit flag triggers quickly
+    "--flag-low-grad-norm-thr", "0.5", # High threshold to trigger easily
+    "--flag-low-weight-update-thr", "0.01", # High threshold to trigger easily
+    #"--disable-graphs", "True", # Enable dashboard to see real-time logs
+]
 
 for model in models:
     for sub in subset:
@@ -116,58 +127,141 @@ for model in models:
                         "args": args
                     })
 
-                    for noise in noise_types:
+                    for noise in noise_types: # 'noise' will be 'gradient'
                         for noise_distrib in noise_distribution:
                             for noise_magnitude in noise_magnitudes:
                                 for noise_schedule in noise_schedules:
                                     for noise_layer in noise_layer_config:
-                                        # permanent is only for weight noise
                                         for perm in permanent:
                                             for stuck_only in noise_during_stuck_only:
-                                                if noise!="weight":
-                                                    break
+
                                                 # Add noise experiments
                                                 args = (run_noise_experiment(model, sub, opti, momentum, 0, 0,
-                                                                            noise, noise_distrib, noise_magnitude, noise_schedule, noise_layer,
+                                                                             noise, noise_distrib, noise_magnitude, noise_schedule, noise_layer,
                                                                              perm, stuck_only, patience)
-                                                                            + common_args)
+                                                        + common_args)
 
                                                 experiments.append({
                                                     "name": f"{model}_{sub}_{noise}_{noise_magnitude}_{noise_schedule}",
                                                     "args": args
-                                                })
+                                                })"""
+
+experiments = []
+
+# List of parameter combinations for experiments
+models = ['baby_cnn']
+subset = [1.0]
+
+# Optimizer parameters
+optimizers = ['sgd']
+momentums = [0]
+
+# Common arguments for all runs
+common_args = [
+    "--data-dir", "./data/cifar10",
+    "--batch-size", "256",
+    "--epochs", "300",
+    "--workers", "6",
+    "--wd", "1e-4",
+    "--flag-min-epochs", "70",
+    "--flag-window-size", "10",
+    "--flag-plateau-delta", "1e-4",
+    "--flag-overfit-epochs", "3",
+    "--flag-grad-plateau-thr", "0.025",
+    "--flag-low-weight-update-thr", "5e-4",
 
 
-            # run experiments  for adam
-            if opti == 'adam':
-                for beta1 in betas1:
-                    for beta2 in betas2:
-                        # Add baseline experiment
-                        args = run_baseline(model, sub, opti, 0, beta1, beta2) + common_args
-                        experiments.append({
-                            "name": f"{model}_{sub}_baseline",
-                            "args": args
-                        })
+    "--relative-min-noise","0.01", # 1% relative noise
+    "--relative-max-noise","0.05", # 10% relative noise
+    "--lr-restart-period","50",    # Restart LR every 50 epochs
+    "--consecutive-flag-trigger","10", # Start cooldown after 3 noisy epochs
+    "--min-cooldown-epochs","3",      # Cooldown for at least 5 epochs
+    "--max-cooldown-epochs","10",
+]
 
-                        for noise in noise_types:
-                            for noise_distrib in noise_distribution:
-                                for noise_magnitude in noise_magnitudes:
-                                    for noise_schedule in noise_schedules:
-                                        for noise_layer in noise_layer_config:
-                                            for perm in permanent:
-                                                for stuck_only in noise_during_stuck_only:
-                                                    if noise != "weight":
-                                                        break
-                                                    # Add noise experiments
-                                                    args = (run_noise_experiment(model, sub, opti, 0, beta1, beta2,
-                                                                                noise, noise_distrib, noise_magnitude, noise_schedule, noise_layer,
-                                                                                 perm, stuck_only, patience)
-                                                                                + common_args)
+baseline_common_args = [
+    "--data-dir", "./data/cifar10",
+    "--batch-size", "256",
+    "--epochs", "300",
+    "--workers", "6",
+    "--wd", "1e-4",
+    "--disable-adaptive-flags"
+]
 
-                                                    experiments.append({
-                                                        "name": f"{model}_{sub}_{noise}_{noise_magnitude}_{noise_schedule}",
-                                                        "args": args
-                                                    })
+
+# experiments = []
+#
+# # --- SCENARIO 1: Baseline (No Noise Ever) ---
+# print("Configuring Baseline Experiment...")
+# for model in models:
+#     for sub in subset:
+#         for opti in optimizers:
+#             if opti == 'sgd':
+#                 for momentum_val in momentums:
+#                     # FIX: Use the minimal baseline_common_args, not the adaptive ones
+#                     args = run_baseline(model, sub, opti, momentum_val, 0, 0) + baseline_common_args
+#                     experiments.append({
+#                         "name": f"{model}_{sub}_baseline_NoNoise",
+#                         "args": args
+#                     })
+
+# --- SCENARIO 2: Continuous Noise Injection (after Patience) ---
+# print("Configuring Continuous Noise Experiment (after patience)...")
+# # Parameters for this scenario:
+# continuous_noise_types = ['gradient'] # Choose the specific noise type for continuous
+# continuous_noise_magnitudes = [0.01]
+# continuous_noise_schedules = [NoiseSchedule.cosine] # Or any schedule
+# continuous_permanent = [False]
+# continuous_stuck_only = [False] # KEY: False for continuous
+# patience  = 5
+# for model in models:
+#     for sub in subset:
+#         for opti in optimizers:
+#             if opti == 'sgd':
+#                 for momentum_val in momentums:
+#                     for noise_type_val in continuous_noise_types:
+#                         for noise_mag_val in continuous_noise_magnitudes:
+#                             for noise_sched_val in continuous_noise_schedules:
+#                                 for perm_val in continuous_permanent:
+#                                     for stuck_only_val in continuous_stuck_only:
+#                                         args = (run_noise_experiment(model, sub, opti, momentum_val, 0, 0,
+#                                                                      noise_type_val, 'gaussian', noise_mag_val, noise_sched_val, None,
+#                                                                      perm_val, stuck_only_val, patience)
+#                                                 + common_args)
+#                                         experiments.append({
+#                                             "name": f"{model}_{sub}_Cont_{noise_type_val}_Mag{noise_mag_val}_Sched{noise_sched_val}",
+#                                             "args": args
+#                                         })
+
+# --- SCENARIO 3: Adaptive Noise Injection (Triggered by Flags) ---
+print("Configuring Adaptive Noise Experiment...")
+# Parameters for this scenario:
+adaptive_noise_types = ['none']  # Choose the specific noise type for adaptive
+adaptive_noise_magnitudes = [0.01]  # The initial magnitude for the adaptive noise
+adaptive_noise_schedules = [NoiseSchedule.cosine]  # The schedule for the adaptive noise
+adaptive_permanent = [False]
+adaptive_stuck_only = [True]  # KEY: True for adaptive
+patience = 10
+for model in models:
+    for sub in subset:
+        for opti in optimizers:
+            if opti == 'sgd':
+                for momentum_val in momentums:
+                    for noise_type_val in adaptive_noise_types:
+                        for noise_mag_val in adaptive_noise_magnitudes:
+                            for noise_sched_val in adaptive_noise_schedules:
+                                for perm_val in adaptive_permanent:
+                                    for stuck_only_val in adaptive_stuck_only:
+                                        args = (run_noise_experiment(model, sub, opti, momentum_val, 0, 0,
+                                                                     noise_type_val, 'gaussian', noise_mag_val,
+                                                                     noise_sched_val, None,
+                                                                     perm_val, stuck_only_val, patience,
+                                                                     )
+                                                + common_args)
+                                        experiments.append({
+                                            "name": f"{model}_{sub}_Adaptive_{noise_type_val}_Mag{noise_mag_val}_Sched{noise_sched_val}",
+                                            "args": args
+                                        })
 
 # Create experiment log file
 log_file = os.path.join(experiments_dir, "experiments_log.json")
@@ -178,16 +272,16 @@ with open(log_file, 'w') as f:
 for i, experiment in enumerate(experiments):
     if isinstance(experiment, str):
         # Handle the case where experiment is a string
-        name = f"experiment_{i+1}"
+        name = f"experiment_{i + 1}"
         args = [experiment]  # Wrap the string in a list
     else:
         # Normal case where experiment is a dictionary
         name = experiment["name"]
         args = experiment["args"]
 
-    print(f"\n{'='*80}")
-    print(f"Starting experiment {i+1}/{len(experiments)}: {name}")
-    print(f"{'='*80}\n")
+    print(f"\n{'=' * 80}")
+    print(f"Starting experiment {i + 1}/{len(experiments)}: {name}")
+    print(f"{'=' * 80}\n")
 
     # Log start time
     start_time = datetime.now()
@@ -212,8 +306,8 @@ for i, experiment in enumerate(experiments):
     print(f"Duration: {duration}")
     print(f"Status: {status}")
 
-    print(f"\n{'='*80}")
-    print(f"Completed experiment {i+1}/{len(experiments)}: {name}")
-    print(f"{'='*80}\n")
+    print(f"\n{'=' * 80}")
+    print(f"Completed experiment {i + 1}/{len(experiments)}: {name}")
+    print(f"{'=' * 80}\n")
 
 print(f"\nAll experiments completed. Results saved in {experiments_dir}/")
