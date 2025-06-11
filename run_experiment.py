@@ -181,7 +181,7 @@ for model in models:
                                     for perm_val in adaptive_permanent:
                                         for stuck_only_val in adaptive_stuck_only:
                                             args = (run_noise_experiment(model, sub, opti, momentum_val, 0, 0,
-                                                                         noise_type_val, 'gaussian', noise_mag_val,
+                                                                         noise_type_val, noise_dist_val, noise_mag_val,
                                                                          noise_sched_val, None,
                                                                          perm_val, stuck_only_val, patience,
                                                                          )

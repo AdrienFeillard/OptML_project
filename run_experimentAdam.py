@@ -120,10 +120,10 @@ print("Configuring Baseline Experiment...")
 for model in models:
     for sub in subset:
         for opti in optimizers:
-            if opti == 'sgd':
+            if opti == 'adam':
                 for momentum_val in momentums:
                     # FIX: Use the minimal baseline_common_args, not the adaptive ones
-                    args = run_baseline(model, sub, opti, momentum_val, 0, 0) + baseline_common_args
+                    args = run_baseline(model, sub, opti, momentum_val, 0.9, 0.999) + baseline_common_args
                     experiments.append({
                         "name": f"{model}_{sub}_baseline_NoNoise",
                         "args": args
@@ -172,7 +172,7 @@ patience = 10
 for model in models:
     for sub in subset:
         for opti in optimizers:
-            if opti == 'sgd':
+            if opti == 'adam':
                 for momentum_val in momentums:
                     for noise_type_val in adaptive_noise_types:
                         for noise_mag_val in adaptive_noise_magnitudes:
@@ -180,8 +180,8 @@ for model in models:
                                 for noise_sched_val in adaptive_noise_schedules:
                                     for perm_val in adaptive_permanent:
                                         for stuck_only_val in adaptive_stuck_only:
-                                            args = (run_noise_experiment(model, sub, opti, momentum_val, 0, 0,
-                                                                         noise_type_val, 'gaussian', noise_mag_val,
+                                            args = (run_noise_experiment(model, sub, opti, momentum_val, 0.9, 0.999,
+                                                                         noise_type_val, noise_dist_val, noise_mag_val,
                                                                          noise_sched_val, None,
                                                                          perm_val, stuck_only_val, patience,
                                                                          )
