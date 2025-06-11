@@ -21,6 +21,7 @@ from .cifar10_models.mobilenetv2 import mobilenet_v2
 from .cifar10_models.resnet import resnet18, resnet34, resnet50
 from .cifar10_models.vgg import vgg11_bn, vgg13_bn, vgg16_bn, vgg19_bn
 from .cifar10_models.SimpleCNN import simple_cnn, tiny_cnn, baby_cnn
+from .cifar10_models.ParametrableCNN import deep_cnn, moderate_cnn, mini_cnn
 from .schduler import WarmupCosineLR
 from .noise_regularization import NoiseType, NoiseRegularizer, NoiseDistribution # Ensure NoiseType is imported
 
@@ -37,7 +38,15 @@ all_classifiers = {
     "resnet18": resnet18(), "resnet34": resnet34(), "resnet50": resnet50(), "densenet121": densenet121(),
     "densenet161": densenet161(), "densenet169": densenet169(), "mobilenet_v2": mobilenet_v2(),
     "googlenet": googlenet(), "inception_v3": inception_v3(), "simple_cnn": simple_cnn(),
-    "tiny_cnn": tiny_cnn(), "baby_cnn": baby_cnn()
+    "tiny_cnn": tiny_cnn(), "baby_cnn": baby_cnn(),
+
+    # CNN architectures
+    "deep_cnn": deep_cnn(),
+    "deep_cnn_r": deep_cnn(use_regularization=True),  # Regularized deep CNN
+    "moderate_cnn": moderate_cnn(),
+    "moderate_cnn_r": moderate_cnn(use_regularization=True),  # Regularized moderate CNN
+    "mini_cnn": mini_cnn(),
+    "mini_cnn_r": mini_cnn(use_regularization=True)  # Regularized mini CNN
 }
 
 architecture_info = {

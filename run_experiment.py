@@ -69,87 +69,10 @@ def run_noise_experiment(model, sub, opti, momentum, beta1, beta2,
 
     return args
 
-
-"""experiments = []
-
-
-
-# List of parameter combinations for experiments
-models = ['baby_cnn']#['resnet18','baby_cnn', 'tiny_cnn', 'simple_cnn', 'resnet18']
-subset = [1.0]
-
-# Optimizer parameters
-optimizers = ['sgd']#, 'adam']
-momentums = [0]#, 0.9]
-#betas1 = [0, 0.9]
-#betas2 = [0.999]
-
-# Noise type parameters
-noise_types =['gradient']# ['weight', 'gradient']
-noise_layer_config = [None] #["layer4.", "conv1", "bias"]
-noise_magnitudes = [0.01]#, 0.05]
-noise_distribution = ['gaussian'] #['normal', 'uniform']
-noise_schedules = [NoiseSchedule.cosine]#, NoiseSchedule.exponential]
-
-# Noise application parameters
-
-permanent = [False] # TODO Test
-noise_during_stuck_only = [True] #[True, False]
-patience = 5
-common_args = [
-    "--data-dir", "./data/cifar10",
-    "--batch-size", "128",
-    "--epochs", "200", # Reduced epochs for faster testing
-    "--workers", "4",
-    "--wd", "1e-4",
-
-    "--flag-min-epochs", "1", # Start checking flags from epoch 1
-    "--flag-window-size", "3", # Use a small window for quicker triggering
-    "--flag-plateau-delta", "1e-3", # Aggressive plateau delta
-    "--flag-overfit-epochs", "1", # Overfit flag triggers quickly
-    "--flag-low-grad-norm-thr", "0.5", # High threshold to trigger easily
-    "--flag-low-weight-update-thr", "0.01", # High threshold to trigger easily
-    #"--disable-graphs", "True", # Enable dashboard to see real-time logs
-]
-
-for model in models:
-    for sub in subset:
-        for opti in optimizers:
-
-            # Run experiments for sgd
-            if opti == 'sgd':
-                for momentum in momentums:
-
-                    # Add baseline experiment
-                    args = run_baseline(model, sub, opti, momentum, 0, 0) + common_args
-                    experiments.append({
-                        "name": f"{model}_{sub}_baseline",
-                        "args": args
-                    })
-
-                    for noise in noise_types: # 'noise' will be 'gradient'
-                        for noise_distrib in noise_distribution:
-                            for noise_magnitude in noise_magnitudes:
-                                for noise_schedule in noise_schedules:
-                                    for noise_layer in noise_layer_config:
-                                        for perm in permanent:
-                                            for stuck_only in noise_during_stuck_only:
-
-                                                # Add noise experiments
-                                                args = (run_noise_experiment(model, sub, opti, momentum, 0, 0,
-                                                                             noise, noise_distrib, noise_magnitude, noise_schedule, noise_layer,
-                                                                             perm, stuck_only, patience)
-                                                        + common_args)
-
-                                                experiments.append({
-                                                    "name": f"{model}_{sub}_{noise}_{noise_magnitude}_{noise_schedule}",
-                                                    "args": args
-                                                })"""
-
 experiments = []
 
 # List of parameter combinations for experiments
-models = ['baby_cnn']
+models = ['mini_cnn', 'moderate_cnn', 'deep_cnn']
 subset = [1.0]
 
 # Optimizer parameters
@@ -192,18 +115,19 @@ baseline_common_args = [
 # experiments = []
 #
 # # --- SCENARIO 1: Baseline (No Noise Ever) ---
-# print("Configuring Baseline Experiment...")
-# for model in models:
-#     for sub in subset:
-#         for opti in optimizers:
-#             if opti == 'sgd':
-#                 for momentum_val in momentums:
-#                     # FIX: Use the minimal baseline_common_args, not the adaptive ones
-#                     args = run_baseline(model, sub, opti, momentum_val, 0, 0) + baseline_common_args
-#                     experiments.append({
-#                         "name": f"{model}_{sub}_baseline_NoNoise",
-#                         "args": args
-#                     })
+
+print("Configuring Baseline Experiment...")
+for model in models:
+    for sub in subset:
+        for opti in optimizers:
+            if opti == 'sgd':
+                for momentum_val in momentums:
+                    # FIX: Use the minimal baseline_common_args, not the adaptive ones
+                    args = run_baseline(model, sub, opti, momentum_val, 0, 0) + baseline_common_args
+                    experiments.append({
+                        "name": f"{model}_{sub}_baseline_NoNoise",
+                        "args": args
+                    })
 
 # --- SCENARIO 2: Continuous Noise Injection (after Patience) ---
 # print("Configuring Continuous Noise Experiment (after patience)...")
@@ -236,12 +160,15 @@ baseline_common_args = [
 # --- SCENARIO 3: Adaptive Noise Injection (Triggered by Flags) ---
 print("Configuring Adaptive Noise Experiment...")
 # Parameters for this scenario:
+
 adaptive_noise_types = ['none']  # Choose the specific noise type for adaptive
 adaptive_noise_magnitudes = [0.01]  # The initial magnitude for the adaptive noise
 adaptive_noise_schedules = [NoiseSchedule.cosine]  # The schedule for the adaptive noise
-adaptive_permanent = [False]
+adaptive_noise_dist = ['gaussian', 'uniform']
+adaptive_permanent = [True]
 adaptive_stuck_only = [True]  # KEY: True for adaptive
 patience = 10
+
 for model in models:
     for sub in subset:
         for opti in optimizers:
@@ -249,19 +176,20 @@ for model in models:
                 for momentum_val in momentums:
                     for noise_type_val in adaptive_noise_types:
                         for noise_mag_val in adaptive_noise_magnitudes:
-                            for noise_sched_val in adaptive_noise_schedules:
-                                for perm_val in adaptive_permanent:
-                                    for stuck_only_val in adaptive_stuck_only:
-                                        args = (run_noise_experiment(model, sub, opti, momentum_val, 0, 0,
-                                                                     noise_type_val, 'gaussian', noise_mag_val,
-                                                                     noise_sched_val, None,
-                                                                     perm_val, stuck_only_val, patience,
-                                                                     )
-                                                + common_args)
-                                        experiments.append({
-                                            "name": f"{model}_{sub}_Adaptive_{noise_type_val}_Mag{noise_mag_val}_Sched{noise_sched_val}",
-                                            "args": args
-                                        })
+                            for noise_dist_val in adaptive_noise_dist:
+                                for noise_sched_val in adaptive_noise_schedules:
+                                    for perm_val in adaptive_permanent:
+                                        for stuck_only_val in adaptive_stuck_only:
+                                            args = (run_noise_experiment(model, sub, opti, momentum_val, 0, 0,
+                                                                         noise_type_val, 'gaussian', noise_mag_val,
+                                                                         noise_sched_val, None,
+                                                                         perm_val, stuck_only_val, patience,
+                                                                         )
+                                                    + common_args)
+                                            experiments.append({
+                                                "name": f"{model}_{sub}_Adaptive_{noise_type_val}_Mag{noise_mag_val}_Sched{noise_sched_val}",
+                                                "args": args
+                                            })
 
 # Create experiment log file
 log_file = os.path.join(experiments_dir, "experiments_log.json")

@@ -3,7 +3,7 @@ import time
 import datetime
 import typer
 import torch
-import torch_directml
+#import torch_directml
 import numpy as np
 from typing import Optional, List, Tuple, Any, Dict
 
@@ -90,9 +90,16 @@ def _setup_environment(args: ArgsNamespace, log_handler: LogHandler) -> torch.de
         log_handler.log("SYSTEM", f"Using DirectML device: {device}")
     except Exception as e:
         log_handler.log("ERROR", f"Error initializing DirectML: {e}")
-        log_handler.log("SYSTEM", "Falling back to CPU")
-        device = torch.device("cpu")
-    return device
+
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            print("CUDA USED")
+        elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+            device = torch.device("mps")
+            print("MPS USED")
+        else:
+            device = torch.device("cpu")
+            print("CPU USED")
 
 def _initialize_training_components(args: ArgsNamespace) -> Tuple[TrainingMetrics, LogHandler]:
     experiment_name = f"{args.classifier}_{args.noise_type}"

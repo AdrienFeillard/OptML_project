@@ -14,9 +14,21 @@ class Classifier(str, Enum):
     mobilenet_v2 = "mobilenet_v2"
     googlenet = "googlenet"
     inception_v3 = "inception_v3"
+
+    # old CNN architectures
     simple_cnn = "simple_cnn"
     tiny_cnn = "tiny_cnn"
     baby_cnn = "baby_cnn"
+
+    # CNN architectures
+    deep_cnn = "deep_cnn"
+    moderate_cnn = "moderate_cnn"
+    mini_cnn = "mini_cnn"
+
+    #Regularized versions
+    deep_cnn_r = "deep_cnn_r"
+    moderate_cnn_r = "moderate_cnn_r"
+    mini_cnn_r = "mini_cnn_r"
 
 class LoggerType(str, Enum):
     tensorboard = "tensorboard"
