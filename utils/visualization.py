@@ -7,7 +7,17 @@ from rich import box
 from rich.align import Align
 import matplotlib.pyplot as plt
 import time
-
+from rich.panel import Panel
+from rich.layout import Layout
+from rich.table import Table
+from rich.text import Text
+from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
+from rich import box
+from rich.align import Align
+from rich.console import Group # Added for grouping progress bars
+import matplotlib.pyplot as plt # Keep for visualize_lr_schedule
+import time
+from typing import Dict, Any, Tuple, Optional, List
 from .configs.config import THEME
 
 def create_accuracy_graph(metrics, width=60, height=10):
@@ -285,221 +295,215 @@ def create_lr_graph(metrics, width=60, height=6):
 
     return graph
 
-def create_dashboard(metrics, log_handler, args, model, current_epoch, max_epochs, batch_idx=None, len_train_loader=None):
-    """Create a dashboard layout with all the information"""
-    # Create main layout
-    layout = Layout()
+# --- Helper functions to generate content for specific panels ---
+def _generate_header_content(args) -> Panel:
+    current_time = time.strftime("%Y-%m-%d %H:%M:%S") #
+    # Using args.classifier.value because class_compatible_args will have string
+    header_text = f"[bold {THEME.get('title', 'white')}]CIFAR-10 Training with {args.classifier}[/]" #
+    date_text = Text.assemble(Text.from_markup(f"[{THEME.get('heading', 'white')}]Date:[/{THEME.get('heading', 'white')}] {current_time}")) #
 
-    # Check if we have a noise regularizer
-    has_noise_regularizer = hasattr(model, 'noise_regularizer') and model.noise_regularizer is not None
+    header_table = Table.grid(expand=True)
+    header_table.add_column(ratio=2)
+    header_table.add_column(ratio=1)
+    header_table.add_row(Panel(header_text, border_style=THEME.get("accent", "blue")), Align.right(date_text))
+    return header_table
 
-    # Split into header, body and footer
-    layout.split(
-        Layout(name="header", size=3),
-        Layout(name="body"),
-        Layout(name="footer", size=4)
-    )
 
-    # Header - Title and info
-    current_time = time.strftime("%Y-%m-%d %H:%M:%S")
-    header_layout = Layout()
-    header_layout.split_row(
-        Layout(Panel(f"[bold {THEME['title']}]CIFAR-10 Training with {args.classifier}[/]", border_style=THEME["accent"]), ratio=2),
-        Layout(Align.right(Text.assemble(
-            Text.from_markup(f"[{THEME['heading']}]Date:[/{THEME['heading']}] {current_time}"),
-        )), ratio=1)
-    )
-    layout["header"].update(header_layout)
-
-    # New layout organization: Graphs in top row, text-based info in bottom row
-    layout["body"].split(
-        Layout(name="graphs_row", ratio=1),  # Top row for all graphs
-        Layout(name="info_row", ratio=1)     # Bottom row for all text-based info
-    )
-
-    # Split the graphs row
-    if has_noise_regularizer:
-        # When we have noise regularizer, make room for its visualization
-        layout["body"]["graphs_row"].split_row(
-            Layout(name="accuracy_graph", ratio=1),
-            Layout(name="loss_graph", ratio=1),
-            Layout(name="noise_magnitude_graph", ratio=1),
-            Layout(name="lr_graph", ratio=1)
-        )
+def _generate_training_metrics_table(metrics, args, current_epoch, batch_idx, len_train_loader) -> Table:
+    avg_loss, avg_acc, last_lr = metrics.get_current_epoch_avg_metrics() #
+    if batch_idx is not None and len_train_loader is not None: #
+        epoch_info = f"Epoch: {current_epoch}/{args.max_epochs} [{batch_idx}/{len_train_loader}]" #
     else:
-        # Without noise regularizer, just the standard graphs
-        layout["body"]["graphs_row"].split_row(
-            Layout(name="accuracy_graph", ratio=1),
-            Layout(name="loss_graph", ratio=1),
-            Layout(name="lr_graph", ratio=1)
-        )
+        epoch_info = f"Epoch: {current_epoch}/{args.max_epochs}" #
 
-    # Split the info row
-    if has_noise_regularizer:
-        layout["body"]["info_row"].split_row(
-            Layout(name="training_metrics", ratio=1),
-            Layout(name="model_info", ratio=1),
-            Layout(name="noise_metrics", ratio=1),
-            Layout(name="log", ratio=2)
-        )
-    else:
-        layout["body"]["info_row"].split_row(
-            Layout(name="training_metrics", ratio=1),
-            Layout(name="model_info", ratio=1),
-            Layout(name="log", ratio=2)
-        )
+    metrics_table = Table(show_header=True, box=box.SIMPLE, title=epoch_info) #
+    metrics_table.add_column("Metric", style=THEME.get("heading", "white")) #
+    metrics_table.add_column("Value", style=THEME.get("metrics", "white")) #
+    metrics_table.add_row("Current Loss", f"{avg_loss:.4f}") #
+    metrics_table.add_row("Current Accuracy", f"{avg_acc*100:.2f}%") #
+    metrics_table.add_row("Learning Rate", f"{last_lr:.6f}") #
 
-    # Current training metrics
-    avg_loss, avg_acc, last_lr = metrics.get_current_epoch_avg_metrics()
+    if metrics.val_acc_history: #
+        best_val_acc = max(metrics.val_acc_history) #
+        best_val_epoch = metrics.epochs[metrics.val_acc_history.index(best_val_acc)] #
+        metrics_table.add_row("Best Validation Acc", f"[{THEME.get('good', 'green')}]{best_val_acc*100:.2f}%[/{THEME.get('good', 'green')}] (Epoch {best_val_epoch})") #
+    return metrics_table
 
-    # Format epoch/batch info
-    if batch_idx is not None and len_train_loader is not None:
-        epoch_info = f"Epoch: {current_epoch}/{max_epochs} [{batch_idx}/{len_train_loader}]"
-    else:
-        epoch_info = f"Epoch: {current_epoch}/{max_epochs}"
+def _generate_model_info_table(args, model) -> Table:
+    model_info_table = Table(show_header=True, box=box.SIMPLE, title="Model Information") #
+    model_info_table.add_column("Property", style=THEME.get("heading", "white")) #
+    model_info_table.add_column("Value", style=THEME.get("metrics", "white")) #
+    total_params = sum(p.numel() for p in model.parameters()) #
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad) #
+    model_info_table.add_row("Architecture", str(args.classifier)) #
+    model_info_table.add_row("Total Parameters", f"{total_params:,}") #
+    model_info_table.add_row("Trainable Parameters", f"{trainable_params:,}") #
+    # ... add other args like batch_size, num_workers etc. from args
+    model_info_table.add_row("Batch Size", str(args.batch_size)) #
+    model_info_table.add_row("Initial LR", str(args.learning_rate)) #
+    return model_info_table
 
-    # Display current metrics
-    metrics_table = Table(show_header=True, box=box.SIMPLE, title=epoch_info)
-    metrics_table.add_column("Metric", style=THEME["heading"])
-    metrics_table.add_column("Value", style=THEME["metrics"])
+def _generate_noise_renderables(model) -> Tuple[Any, Any]:
+    noise_metrics_content = Text("Noise not active or no data.", style="dim") #
+    noise_graph_content = Text("Noise not active or no data.", style="dim") #
+    noise_title_prefix = "Noise"
 
-    metrics_table.add_row("Current Loss", f"{avg_loss:.4f}")
-    metrics_table.add_row("Current Accuracy", f"{avg_acc*100:.2f}%")
-    metrics_table.add_row("Learning Rate", f"{last_lr:.6f}")
-
-    if metrics.val_acc_history:
-        best_val_acc = max(metrics.val_acc_history)
-        best_val_epoch = metrics.epochs[metrics.val_acc_history.index(best_val_acc)]
-        metrics_table.add_row("Best Validation Acc", f"[{THEME['good']}]{best_val_acc*100:.2f}%[/{THEME['good']}] (Epoch {best_val_epoch})")
-
-    # Model info
-    model_info = Table(show_header=True, box=box.SIMPLE, title="Model Information")
-    model_info.add_column("Property", style=THEME["heading"])
-    model_info.add_column("Value", style=THEME["metrics"])
-
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    model_info.add_row("Architecture", str(args.classifier))
-    model_info.add_row("Total Parameters", f"{total_params:,}")
-    model_info.add_row("Trainable Parameters", f"{trainable_params:,}")
-    model_info.add_row("Batch Size", str(args.batch_size))
-    model_info.add_row("Workers", str(args.num_workers))
-    model_info.add_row("Initial LR", str(args.learning_rate))
-    model_info.add_row("Weight Decay", str(args.weight_decay))
-
-    # Create accuracy and loss graphs
-    accuracy_graph = Panel(
-        create_accuracy_graph(metrics, width=80, height=15),  # Increased height
-        title="Accuracy History",
-        border_style=THEME["good"],
-        expand=True
-    )
-
-    loss_graph = Panel(
-        create_loss_graph(metrics, width=80, height=15),  # Increased height
-        title="Loss History",
-        border_style=THEME["bad"],
-        expand=True
-    )
-
-    # Create LR graph with more height
-    lr_graph = Panel(
-        create_lr_graph(metrics, width=80, height=15),  # Increased height
-        title="Learning Rate Schedule",
-        border_style=THEME["accent"],
-        expand=True
-    )
-
-    # Create log panel
-    log_panel = Panel(
-        log_handler.get_logs_table(),
-        title="Training Log",
-        border_style="green",
-        expand=True
-    )
-
-    # Progress bars for footer
-    progress_table = Table(show_header=False, box=None, expand=True)
-    progress_table.add_column("Label", style=THEME["heading"])
-    progress_table.add_column("Progress", ratio=3)
-    progress_table.add_column("Info", justify="right")
-
-    # Epoch progress
-    epoch_progress = Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(complete_style=THEME["good"]),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TimeRemainingColumn(),
-        expand=True
-    )
-    epoch_task = epoch_progress.add_task("Epoch Progress", total=max_epochs, completed=current_epoch)
-
-    # Batch progress (if applicable)
-    if batch_idx is not None and len_train_loader is not None:
-        batch_progress = Progress(
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(complete_style=THEME["accent"]),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TimeRemainingColumn(),
-            expand=True
-        )
-        batch_task = batch_progress.add_task("Batch Progress", total=len_train_loader, completed=batch_idx)
-        progress_table.add_row("", batch_progress, "")
-
-    progress_table.add_row("", epoch_progress, "")
-
-    # Update all layout sections - graphs row
-    layout["body"]["graphs_row"]["accuracy_graph"].update(accuracy_graph)
-    layout["body"]["graphs_row"]["loss_graph"].update(loss_graph)
-
-    # Information row
-    layout["body"]["info_row"]["training_metrics"].update(
-        Panel(metrics_table, title="Training Metrics", border_style=THEME["accent"]))
-    layout["body"]["info_row"]["model_info"].update(
-        Panel(model_info, title="Model Configuration", border_style=THEME["heading"]))
-    layout["body"]["info_row"]["log"].update(log_panel)
-
-    # Add noise regularization elements if available
-    if has_noise_regularizer:
-        # Create default table and graph for noise metrics
-        noise_metrics_table = Text("Collecting noise metrics...", style="dim")
-        noise_graph = Text("Collecting noise data...", style="dim")
-
-        # Try to get actual metrics if available
+    if hasattr(model, 'noise_regularizer') and model.noise_regularizer: #
+        noise_title_prefix = model.noise_regularizer.noise_type.capitalize() #
         try:
-            noise_metrics_table = model.noise_regularizer.get_metrics_table()
-            noise_graph = model.noise_regularizer.create_noise_magnitude_graph(width=80, height=15)  # Increased height
-        except Exception as e:
-            # If there's an error, use the default text
-            pass
+            noise_metrics_content = model.noise_regularizer.get_metrics_table() #
+            noise_graph_content = model.noise_regularizer.create_noise_magnitude_graph(width=80, height=15) #
+        except Exception:
+            pass # Keep default "No data" text
+    return noise_metrics_content, noise_graph_content, noise_title_prefix
 
-        # Create panels with the content
-        noise_metrics_panel = Panel(
-            noise_metrics_table,
-            title=f"{model.noise_regularizer.noise_type.capitalize()} Noise Metrics",
-            border_style="yellow",
-            expand=True
-        )
 
-        noise_graph_panel = Panel(
-            noise_graph,
-            title="Noise Magnitude History",
-            border_style="cyan",
-            expand=True
-        )
+def create_dashboard(
+        args, # ArgsNamespace for initial setup
+        initial_training_metrics, # TrainingMetrics instance
+        initial_log_handler,    # LogHandler instance
+        model, # For model info and noise regularizer
+        epoch_progress_widget: Progress, # Persistent widget
+        batch_progress_widget: Progress  # Persistent widget
+) -> Tuple[Layout, Dict[str, Any]]:
+    """
+    Creates the initial dashboard layout and a dictionary of its persistent, updatable components.
+    This function is called ONCE.
+    """
+    layout = Layout(name="root") #
+    layout.split_column( #
+        Layout(name="header", size=3), #
+        Layout(name="body"), #
+        Layout(name="footer", size=5)  # Increased footer size for two progress bars
+    )
+    layout["body"].split_column( #
+        Layout(name="graphs_row", ratio=1), #
+        Layout(name="info_row", ratio=1) #
+    )
 
-        # Update noise-specific sections
-        layout["body"]["graphs_row"]["noise_magnitude_graph"].update(noise_graph_panel)
-        layout["body"]["info_row"]["noise_metrics"].update(noise_metrics_panel)
+    has_noise_regularizer = hasattr(model, 'noise_regularizer') and model.noise_regularizer is not None #
 
-    # Put LR graph in the graph row rather than footer
-    layout["body"]["graphs_row"]["lr_graph"].update(lr_graph)
+    if not args.disable_graphs:
+        graph_row_children = [ #
+            Layout(name="accuracy_graph", ratio=1), #
+            Layout(name="loss_graph", ratio=1), #
+            Layout(name="lr_graph", ratio=1) #
+        ]
+        if has_noise_regularizer: #
+            graph_row_children.insert(2, Layout(name="noise_magnitude_graph", ratio=1)) # Insert before LR graph
+        layout["body"]["graphs_row"].split_row(*graph_row_children) #
+    else:
+        layout["body"]["graphs_row"].update(Panel(Text("ASCII Graphs Disabled", justify="center", style="dim")))
+    # Define info row structure
+    info_row_children = [ #
+        Layout(name="training_metrics_display", ratio=1), #
+        Layout(name="model_info_display", ratio=1), #
+        Layout(name="log_display", ratio=2) #
+    ]
+    if has_noise_regularizer: #
+        info_row_children.insert(2, Layout(name="noise_metrics_display", ratio=1)) # Insert before log display
+    layout["body"]["info_row"].split_row(*info_row_children) #
 
-    # Update footer with just progress
-    layout["footer"].update(progress_table)
+    # Create and store persistent components/panels
+    components = {}
 
-    return layout
+    # Header
+    header_table_content = _generate_header_content(args)
+    components['header_panel'] = Panel(header_table_content, border_style=THEME.get("accent", "blue")) # No title for the panel itself if the table has one or layout handles it
+
+# Graphs (Panels holding Text content)
+    if not args.disable_graphs:
+        components['accuracy_graph_content'] = create_accuracy_graph(initial_training_metrics) #
+        components['accuracy_graph_panel'] = Panel(components['accuracy_graph_content'], title="Accuracy History", border_style=THEME.get("good", "green"), expand=True) #
+
+        components['loss_graph_content'] = create_loss_graph(initial_training_metrics) #
+        components['loss_graph_panel'] = Panel(components['loss_graph_content'], title="Loss History", border_style=THEME.get("bad", "red"), expand=True) #
+
+        components['lr_graph_content'] = create_lr_graph(initial_training_metrics) #
+        components['lr_graph_panel'] = Panel(components['lr_graph_content'], title="Learning Rate Schedule", border_style=THEME.get("accent", "blue"), expand=True) #
+
+    if has_noise_regularizer: #
+        initial_noise_metrics_content, initial_noise_graph_content, noise_title_prefix = _generate_noise_renderables(model)
+        components['noise_metrics_content'] = initial_noise_metrics_content
+        components['noise_metrics_panel'] = Panel(components['noise_metrics_content'], title=f"{noise_title_prefix} Noise Metrics", border_style="yellow", expand=True) #
+        if not args.disable_graphs:
+            components['noise_graph_content'] = initial_noise_graph_content
+            components['noise_graph_panel'] = Panel(components['noise_graph_content'], title="Noise Magnitude History", border_style="cyan", expand=True) #
+
+    # Info Panels (Panels holding Tables)
+    components['metrics_table_content'] = _generate_training_metrics_table(initial_training_metrics, args, 0, None, None)
+    components['metrics_panel'] = Panel(components['metrics_table_content'], title="Training Metrics", border_style=THEME.get("accent", "blue")) #
+
+    components['model_info_table_content'] = _generate_model_info_table(args, model)
+    components['model_info_panel'] = Panel(components['model_info_table_content'], title="Model Configuration", border_style=THEME.get("heading", "white")) #
+
+    components['log_table_content'] = initial_log_handler.get_logs_table() #
+    components['log_panel'] = Panel(components['log_table_content'], title="Training Log", border_style="green", expand=True) #
+
+    # Store persistent progress widgets
+    components['epoch_progress_widget'] = epoch_progress_widget
+    components['batch_progress_widget'] = batch_progress_widget
+
+    # Initial population of layout
+    layout["header"].update(components['header_panel']) #
+    if not args.disable_graphs:
+        layout["body"]["graphs_row"]["accuracy_graph"].update(components['accuracy_graph_panel'])
+        layout["body"]["graphs_row"]["loss_graph"].update(components['loss_graph_panel'])
+        layout["body"]["graphs_row"]["lr_graph"].update(components['lr_graph_panel'])
+
+    layout["body"]["info_row"]["training_metrics_display"].update(components['metrics_panel']) #
+    layout["body"]["info_row"]["model_info_display"].update(components['model_info_panel']) #
+    layout["body"]["info_row"]["log_display"].update(components['log_panel']) #
+
+    if has_noise_regularizer: #
+        if not args.disable_graphs:
+            layout["body"]["graphs_row"]["noise_magnitude_graph"].update(components['noise_graph_panel']) #
+        layout["body"]["info_row"]["noise_metrics_display"].update(components['noise_metrics_panel']) #
+
+    progress_group = Group(components['batch_progress_widget'], components['epoch_progress_widget']) #
+    layout["footer"].update(Panel(progress_group, title="Progress")) # (Updated to Panel)
+
+    return layout, components
+
+def update_dashboard_contents(
+        components: Dict[str, Any],
+        training_metrics, # TrainingMetrics instance
+        log_handler,      # LogHandler instance
+        args: Any,        # ArgsNamespace instance
+        model: Any,       # CIFAR10Module instance
+        current_epoch: int,
+        max_epochs: int, # Used by some content generators
+        batch_idx: Optional[int] = None,
+        len_train_loader: Optional[int] = None
+):
+    """
+    Updates the content of the persistent dashboard components.
+    Progress bars are updated externally.
+    """
+    # Update Header (time might change, or other dynamic info)
+    components['header_panel'].renderable = _generate_header_content(args) # Assuming _generate_header_content returns a Panel or compatible table for update
+
+    # Update Graph Panels by replacing their Text content
+    if not args.disable_graphs:
+        components['accuracy_graph_panel'].renderable = create_accuracy_graph(training_metrics) #
+        components['loss_graph_panel'].renderable = create_loss_graph(training_metrics) #
+        components['lr_graph_panel'].renderable = create_lr_graph(training_metrics) #
+
+    # Update Info Panels by replacing their Table content
+    components['metrics_panel'].renderable = _generate_training_metrics_table(training_metrics, args, current_epoch, batch_idx, len_train_loader) #
+    # Model info typically doesn't change, but if it could:
+    # components['model_info_panel'].renderable = _generate_model_info_table(args, model)
+
+    components['log_panel'].renderable = log_handler.get_logs_table() #
+
+    if hasattr(model, 'noise_regularizer') and model.noise_regularizer: #
+        if 'noise_metrics_panel' in components and 'noise_graph_panel' in components:
+            noise_metrics_content, noise_graph_content, noise_title_prefix = _generate_noise_renderables(model)
+            components['noise_metrics_panel'].renderable = noise_metrics_content #
+            components['noise_metrics_panel'].title = f"{noise_title_prefix} Noise Metrics" #
+            if not args.disable_graphs:
+                components['noise_graph_panel'].renderable = noise_graph_content #
+
 
 def visualize_lr_schedule(optimizer, scheduler, steps, save_path="lr_schedule.png"):
     """Plot the learning rate schedule"""
