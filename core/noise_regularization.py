@@ -85,6 +85,10 @@ class NoiseRegularizer:
 
     def _update_magnitude(self):
         """Update noise magnitude based on schedule"""
+        # Add this check at the beginning
+        #if self.noise_type == NoiseType.none:
+        #    self.current_magnitude = 0.0
+        #elif self.schedule == NoiseSchedule.constant:
         if self.schedule == NoiseSchedule.constant:
             self.current_magnitude = self.initial_magnitude
         elif self.schedule == NoiseSchedule.linear:

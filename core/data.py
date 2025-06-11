@@ -32,7 +32,7 @@ class CIFAR10Data:
         # Datasets will be initialized in setup
         self.train_dataset = None
         self.val_dataset = None
-
+        self.test_dataset_final = None
         # Store the % of the dataset we want to use
         self.subset = args.subset
 
@@ -153,18 +153,31 @@ class CIFAR10Data:
                 root=self.data_dir, train=True, transform=train_transform
             )
 
-        with console.status("[cyan]Loading validation dataset...[/cyan]"):
-            self.val_dataset = CIFAR10(
-                root=self.data_dir, train=False, transform=test_transform
+        with console.status("[cyan]Loading and splitting original test set for validation and final test...[/cyan]"): #
+            original_test_set = CIFAR10( #
+                root=self.data_dir, train=False, transform=test_transform #
             )
 
-        console.print(f"[green]Training samples: {len(self.train_dataset)}[/green]")
-        console.print(f"[green]Validation samples: {len(self.val_dataset)}[/green]")
+        original_test_targets = np.array(original_test_set.targets) # For stratified split
 
-        # Print dataset class information
-        classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-        console.print("[bold]CIFAR-10 Classes:[/bold]")
-        for i, cls in enumerate(classes):
+        if len(original_test_set) > 0: # Ensure there are samples to split
+            splitter = StratifiedShuffleSplit(n_splits=1, test_size=0.5, random_state=42) # 50% for test_final
+            val_indices, test_final_indices = next(splitter.split(np.zeros(len(original_test_targets)), original_test_targets))
+
+            self.val_dataset = Subset(original_test_set, val_indices)
+            self.test_dataset_final = Subset(original_test_set, test_final_indices)
+        else: # Fallback if original_test_set is empty for some reason
+            self.val_dataset = original_test_set
+            self.test_dataset_final = original_test_set
+
+
+        console.print(f"[green]Training samples: {len(self.train_dataset)}[/green]") #
+        console.print(f"[green]Validation samples (for training): {len(self.val_dataset)}[/green]")
+        console.print(f"[green]Final Test samples (held-out): {len(self.test_dataset_final)}[/green]")
+
+        classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck') #
+        console.print("[bold]CIFAR-10 Classes:[/bold]") #
+        for i, cls in enumerate(classes): #
             console.print(f"  • Class {i}: [cyan]{cls}[/cyan]")
 
     def train_dataloader(self):
@@ -201,14 +214,29 @@ class CIFAR10Data:
         )
 
     def val_dataloader(self):
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            drop_last=True,
-            pin_memory=True,
-            persistent_workers=True if self.num_workers > 0 else False,
+        # This now uses the new, smaller self.val_dataset
+        return DataLoader( #
+            self.val_dataset, # Uses the NEW validation set
+            batch_size=self.batch_size, #
+            num_workers=self.num_workers, #
+            # drop_last=True, # Usually False for val/test to evaluate all samples
+            drop_last=False,
+            pin_memory=True, #
+            persistent_workers=True if self.num_workers > 0 else False, #
         )
 
     def test_dataloader(self):
-        return self.val_dataloader()
+        # This now returns a DataLoader for the new, final held-out test set
+        if self.test_dataset_final is None:
+            console.print("[bold red]Error: Final test dataset not setup![/bold red]")
+            # Fallback or raise error
+            return self.val_dataloader() # Fallback to val_dataloader to prevent crash, but this isn't ideal
+
+        return DataLoader(
+            self.test_dataset_final, # Use the new final test set
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            drop_last=False, # Important for test set
+            pin_memory=True,
+            persistent_workers=True if self.num_workers > 0 else False,
+        )

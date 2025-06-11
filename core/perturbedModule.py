@@ -1,5 +1,3 @@
-from enum import Enum
-
 import torch
 import torch.nn as nn
 from rich.console import Console
@@ -64,18 +62,6 @@ architecture_info = {
     "googlenet": {"type": "GoogleNet", "layers": "-", "params": "6.8M", "description": "GoogLeNet/Inception v1"},
     "inception_v3": {"type": "Inception", "layers": "-", "params": "27.2M", "description": "Inception v3"},
 }
-
-class NoiseType(str, Enum):
-    none = "none"
-    gradient = "gradient"
-    weight = "weight"
-    input = "input"
-    label = "label"
-    dropout = "dropout"
-
-class NoiseDistribution(str, Enum):
-    gaussian = "gaussian"
-    uniform = "uniform"
 
 class PerturbedCIFAR10Module(nn.Module):
     def __init__(self, args):
