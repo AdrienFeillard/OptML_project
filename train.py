@@ -3,7 +3,6 @@ import time
 import datetime
 import typer
 import torch
-#import torch_directml
 import numpy as np
 from typing import Optional, List, Tuple, Any, Dict
 
@@ -90,6 +89,7 @@ def _setup_environment(args: ArgsNamespace, log_handler: LogHandler) -> torch.de
 
     log_handler.log("SYSTEM", "Random seed set to 0 for reproducibility")
     try:
+        import torch_directml
         device_id = int(args.gpu_id.split(",")[0])
         log_handler.log("SYSTEM", f"Initializing DirectML device {device_id}")
         device = torch_directml.device(device_id)

@@ -148,31 +148,20 @@ class WarmupCosineLR(_LRScheduler):
 class CosineAnnealingWithDecayingRestartsLR(_LRScheduler):
     """
     Custom scheduler that implements cosine annealing with warm restarts, where the
-    maximum learning rate decays linearly over the entire training duration to a
-    specified final value.
+    maximum learning rate decays linearly over a specified number of steps.
     """
 
     def __init__(
             self,
             optimizer: Optimizer,
             T_0: int,
-            total_steps: int,
+            decay_steps: int, # MODIFIED: Use decay_steps instead of total_steps
             eta_min: float = 0,
-            final_max_lr: float = 1e-5, # MODIFIED: Use an absolute final LR
+            final_max_lr: float = 1e-5,
             T_mult: int = 1,
             last_epoch: int = -1,
     ):
-        """
-        Args:
-            optimizer (Optimizer): Wrapped optimizer.
-            T_0 (int): Number of steps in the first restart cycle.
-            total_steps (int): Total number of steps in the entire training process.
-                               Used to calculate the decay of the max LR.
-            eta_min (float): Minimum learning rate. Default: 0.
-            final_max_lr (float): The absolute maximum learning rate for the final restart cycle.
-            T_mult (int): A factor that increases T_i after a restart. Default: 1.
-            last_epoch (int): The index of the last epoch. Default: -1.
-        """
+        # ... (constructor docstring remains the same) ...
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
         if T_mult < 1 or not isinstance(T_mult, int):
@@ -182,8 +171,8 @@ class CosineAnnealingWithDecayingRestartsLR(_LRScheduler):
         self.T_i = T_0
         self.T_mult = T_mult
         self.eta_min = eta_min
-        self.total_steps = total_steps
-        self.final_max_lr = final_max_lr # MODIFIED: Store the new parameter
+        self.decay_steps = decay_steps # MODIFIED: Store decay_steps
+        self.final_max_lr = final_max_lr
         self.T_cur = last_epoch
         super().__init__(optimizer, last_epoch)
 
@@ -197,13 +186,13 @@ class CosineAnnealingWithDecayingRestartsLR(_LRScheduler):
 
         new_lrs = []
         for base_lr in self.base_lrs:
-            # --- MODIFIED: Calculate the current (decaying) maximum learning rate ---
-            progress = self.last_epoch / self.total_steps if self.total_steps > 0 else 1
+            # --- MODIFIED: Progress is now based on decay_steps and capped at 1.0 ---
+            progress = min(1.0, self.last_epoch / self.decay_steps) if self.decay_steps > 0 else 1.0
 
-            # Linearly decay the max LR from the initial base_lr down to the specified final_max_lr
+            # This calculation remains the same, but 'progress' now behaves differently
             current_max_lr = base_lr - progress * (base_lr - self.final_max_lr)
 
-            # --- Cosine annealing formula remains the same, but uses the new current_max_lr ---
+            # Cosine annealing formula
             term1 = self.eta_min
             term2_numerator = current_max_lr - self.eta_min
             term2_denominator = 2
@@ -214,7 +203,9 @@ class CosineAnnealingWithDecayingRestartsLR(_LRScheduler):
 
         return new_lrs
 
+    # The 'step' method remains unchanged from the previous version
     def step(self, epoch=None):
+        # ... (no changes needed here)
         if epoch is None:
             epoch = self.last_epoch + 1
             self.T_cur = self.T_cur + 1
@@ -241,9 +232,11 @@ class CosineAnnealingWithDecayingRestartsLR(_LRScheduler):
         class _enable_get_lr_call:
             def __init__(self, sched):
                 self.sched = sched
+
             def __enter__(self):
                 self.sched._get_lr_called_within_step = True
                 return self
+
             def __exit__(self, exc_type, exc_val, exc_tb):
                 self.sched._get_lr_called_within_step = False
 

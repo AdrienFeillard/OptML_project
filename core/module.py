@@ -170,17 +170,20 @@ class CIFAR10Module(nn.Module):
 
         # --- START: Corrected Scheduler Logic ---
         # Calculate T_0 in terms of batches, not epochs
-        restart_period_in_steps = self.args.lr_restart_period * steps_per_epoch
 
         total_training_steps = self.args.max_epochs * steps_per_epoch
         restart_period_in_steps = self.args.lr_restart_period * steps_per_epoch
 
+        decay_epochs = self.args.max_epochs - self.args.lr_restart_period
+        decay_steps = decay_epochs * steps_per_epoch
+
+        # The scheduler instantiation remains the same
         scheduler = CosineAnnealingWithDecayingRestartsLR(
             optimizer,
             T_0=restart_period_in_steps,
-            eta_min=1e-6,                       # Your specified minimum LR
-            total_steps=total_training_steps,
-            final_max_lr=1e-5                   # YOUR NEW TARGET FINAL RESTART LR
+            eta_min=1e-6,
+            decay_steps=decay_steps, # Pass in the new robustly calculated duration
+            final_max_lr=1e-5
         )
 
         # Update the info table to reflect the new scheduler
@@ -193,7 +196,8 @@ class CIFAR10Module(nn.Module):
         optim_table.add_row("Restart Period (T_0)", f"{self.args.lr_restart_period} epochs ({restart_period_in_steps} steps)")
         optim_table.add_row("Total Training Steps", str(total_training_steps))
         optim_table.add_row("Min LR (eta_min)", "1e-6")
-        optim_table.add_row("Final Restart LR", "1e-5") # Updated this line
+        optim_table.add_row("Decay Duration", f"{decay_epochs} epochs ({decay_steps} steps)")
+        optim_table.add_row("Final Restart LR", "1e-5")
         console.print(Panel(optim_table, title="Optimizer Configuration", border_style="green"))
 
         return optimizer, scheduler

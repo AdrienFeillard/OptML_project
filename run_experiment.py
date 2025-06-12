@@ -4,8 +4,6 @@ import os
 import json
 from datetime import datetime
 
-from sympy.physics.units import momentum
-
 from core.noise_regularization import NoiseSchedule
 
 # Create experiments directory for results
@@ -14,7 +12,7 @@ experiments_dir = f"experiments_{timestamp}"
 os.makedirs(experiments_dir, exist_ok=True)
 
 
-def run_baseline(model, sub, opti, momentum, beta1, beta2):
+def run_baseline(model, sub, opti, momentum, beta1, beta2, lr):
     """
     Function to run a baseline experiment without noise.
     """
@@ -29,13 +27,13 @@ def run_baseline(model, sub, opti, momentum, beta1, beta2):
         "--momentum", str(momentum),
         "--beta1", str(beta1),
         "--beta2", str(beta2),
-        "--lr", ("1e-3" if opti == 'adam' else "1e-3"),
+        "--lr", str(lr),
     ]
 
     return args
 
 
-def run_noise_experiment(model, sub, opti, momentum, beta1, beta2,
+def run_noise_experiment(model, sub, opti, momentum, beta1, beta2, lr,
                          noise, noise_distrib, noise_magnitude, noise_schedule, noise_layer,
                          permanent, noise_during_stuck_only, patience):
     """
@@ -55,7 +53,7 @@ def run_noise_experiment(model, sub, opti, momentum, beta1, beta2,
         "--momentum", str(momentum),
         "--beta1", str(beta1),
         "--beta2", str(beta2),
-        "--lr", ("1e-3" if opti == 'adam' else "1e-3"),
+        "--lr", str(lr),
         "--patience", str(patience),
     ]
 
@@ -74,6 +72,7 @@ experiments = []
 # List of parameter combinations for experiments
 models = ['baby_cnn', 'tiny_cnn', 'resnet18', 'simple_cnn']
 subset = [1.0]
+lrs = [0.1, 0.01, 0.001]  # Learning rates to test
 
 # Optimizer parameters
 optimizers = ['sgd']
@@ -117,21 +116,22 @@ baseline_common_args = [
 print("Configuring Baseline Experiment...")
 for model in models:
     for sub in subset:
-        for opti in optimizers:
-            if opti == 'sgd':
-                for momentum_val in momentums:
-                    args = run_baseline(model, sub, opti, momentum_val, 0, 0) + baseline_common_args
-                    experiments.append({
-                        "name": f"{model}_{sub}_baseline_NoNoise",
-                        "args": args
-                    })
-            if opti == 'adam':
-                for momentum_val in momentums:
-                    args = run_baseline(model, sub, opti, momentum_val, 0.9, 0.999) + baseline_common_args
-                    experiments.append({
-                        "name": f"{model}_{sub}_baseline_NoNoise",
-                        "args": args
-                    })
+        for lr in lrs:
+            for opti in optimizers:
+                if opti == 'sgd':
+                    for momentum_val in momentums:
+                        args = run_baseline(model, sub, opti, momentum_val, 0, 0, lr) + baseline_common_args
+                        experiments.append({
+                            "name": f"{model}_{sub}_baseline_NoNoise",
+                            "args": args
+                        })
+                if opti == 'adam':
+                    for momentum_val in momentums:
+                        args = run_baseline(model, sub, opti, momentum_val, 0.9, 0.999, lr) + baseline_common_args
+                        experiments.append({
+                            "name": f"{model}_{sub}_baseline_NoNoise",
+                            "args": args
+                        })
 
 # --- SCENARIO 2: Adaptive Noise Injection (Triggered by Flags) ---
 print("Configuring Adaptive Noise Experiment...")
@@ -147,16 +147,34 @@ patience = 10
 
 for model in models:
     for sub in subset:
-        for opti in optimizers:
-            if opti == 'sgd':
-                for momentum_val in momentums:
+        for lr in lrs:
+            for opti in optimizers:
+                if opti == 'sgd':
+                    for momentum_val in momentums:
+                        for noise_type_val in adaptive_noise_types:
+                            for noise_mag_val in adaptive_noise_magnitudes:
+                                for noise_dist_val in adaptive_noise_dist:
+                                    for noise_sched_val in adaptive_noise_schedules:
+                                        for perm_val in adaptive_permanent:
+                                            for stuck_only_val in adaptive_stuck_only:
+                                                args = (run_noise_experiment(model, sub, opti, momentum_val, 0, 0, lr,
+                                                                             noise_type_val, noise_dist_val, noise_mag_val,
+                                                                             noise_sched_val, None,
+                                                                             perm_val, stuck_only_val, patience,
+                                                                             )
+                                                        + common_args)
+                                                experiments.append({
+                                                    "name": f"{model}_{sub}_Adaptive_{noise_type_val}_Mag{noise_mag_val}_Sched{noise_sched_val}",
+                                                    "args": args
+                                                })
+                if opti == 'adam':
                     for noise_type_val in adaptive_noise_types:
                         for noise_mag_val in adaptive_noise_magnitudes:
                             for noise_dist_val in adaptive_noise_dist:
                                 for noise_sched_val in adaptive_noise_schedules:
                                     for perm_val in adaptive_permanent:
                                         for stuck_only_val in adaptive_stuck_only:
-                                            args = (run_noise_experiment(model, sub, opti, momentum_val, 0, 0,
+                                            args = (run_noise_experiment(model, sub, opti, momentum_val, 0.9, 0.999, lr,
                                                                          noise_type_val, noise_dist_val, noise_mag_val,
                                                                          noise_sched_val, None,
                                                                          perm_val, stuck_only_val, patience,
@@ -166,23 +184,6 @@ for model in models:
                                                 "name": f"{model}_{sub}_Adaptive_{noise_type_val}_Mag{noise_mag_val}_Sched{noise_sched_val}",
                                                 "args": args
                                             })
-            if opti == 'adam':
-                for noise_type_val in adaptive_noise_types:
-                    for noise_mag_val in adaptive_noise_magnitudes:
-                        for noise_dist_val in adaptive_noise_dist:
-                            for noise_sched_val in adaptive_noise_schedules:
-                                for perm_val in adaptive_permanent:
-                                    for stuck_only_val in adaptive_stuck_only:
-                                        args = (run_noise_experiment(model, sub, opti, momentum_val, 0.9, 0.999,
-                                                                     noise_type_val, noise_dist_val, noise_mag_val,
-                                                                     noise_sched_val, None,
-                                                                     perm_val, stuck_only_val, patience,
-                                                                     )
-                                                + common_args)
-                                        experiments.append({
-                                            "name": f"{model}_{sub}_Adaptive_{noise_type_val}_Mag{noise_mag_val}_Sched{noise_sched_val}",
-                                            "args": args
-                                        })
 
 # Create experiment log file
 log_file = os.path.join(experiments_dir, "experiments_log.json")
