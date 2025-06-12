@@ -25,10 +25,6 @@ class Classifier(str, Enum):
     moderate_cnn = "moderate_cnn"
     mini_cnn = "mini_cnn"
 
-    #Regularized versions
-    deep_cnn_r = "deep_cnn_r"
-    moderate_cnn_r = "moderate_cnn_r"
-    mini_cnn_r = "mini_cnn_r"
 
 class LoggerType(str, Enum):
     tensorboard = "tensorboard"

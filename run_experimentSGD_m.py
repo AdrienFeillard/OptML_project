@@ -112,8 +112,6 @@ baseline_common_args = [
 ]
 
 
-# experiments = []
-#
 # # --- SCENARIO 1: Baseline (No Noise Ever) ---
 
 print("Configuring Baseline Experiment...")
@@ -122,42 +120,20 @@ for model in models:
         for opti in optimizers:
             if opti == 'sgd':
                 for momentum_val in momentums:
-                    # FIX: Use the minimal baseline_common_args, not the adaptive ones
                     args = run_baseline(model, sub, opti, momentum_val, 0, 0) + baseline_common_args
                     experiments.append({
                         "name": f"{model}_{sub}_baseline_NoNoise",
                         "args": args
                     })
+            if opti == 'adam':
+                for momentum_val in momentums:
+                    args = run_baseline(model, sub, opti, momentum_val, 0.9, 0.999) + baseline_common_args
+                    experiments.append({
+                        "name": f"{model}_{sub}_baseline_NoNoise",
+                        "args": args
+                    })
 
-# --- SCENARIO 2: Continuous Noise Injection (after Patience) ---
-# print("Configuring Continuous Noise Experiment (after patience)...")
-# # Parameters for this scenario:
-# continuous_noise_types = ['gradient'] # Choose the specific noise type for continuous
-# continuous_noise_magnitudes = [0.01]
-# continuous_noise_schedules = [NoiseSchedule.cosine] # Or any schedule
-# continuous_permanent = [False]
-# continuous_stuck_only = [False] # KEY: False for continuous
-# patience  = 5
-# for model in models:
-#     for sub in subset:
-#         for opti in optimizers:
-#             if opti == 'sgd':
-#                 for momentum_val in momentums:
-#                     for noise_type_val in continuous_noise_types:
-#                         for noise_mag_val in continuous_noise_magnitudes:
-#                             for noise_sched_val in continuous_noise_schedules:
-#                                 for perm_val in continuous_permanent:
-#                                     for stuck_only_val in continuous_stuck_only:
-#                                         args = (run_noise_experiment(model, sub, opti, momentum_val, 0, 0,
-#                                                                      noise_type_val, 'gaussian', noise_mag_val, noise_sched_val, None,
-#                                                                      perm_val, stuck_only_val, patience)
-#                                                 + common_args)
-#                                         experiments.append({
-#                                             "name": f"{model}_{sub}_Cont_{noise_type_val}_Mag{noise_mag_val}_Sched{noise_sched_val}",
-#                                             "args": args
-#                                         })
-
-# --- SCENARIO 3: Adaptive Noise Injection (Triggered by Flags) ---
+# --- SCENARIO 2: Adaptive Noise Injection (Triggered by Flags) ---
 print("Configuring Adaptive Noise Experiment...")
 # Parameters for this scenario:
 
@@ -190,6 +166,23 @@ for model in models:
                                                 "name": f"{model}_{sub}_Adaptive_{noise_type_val}_Mag{noise_mag_val}_Sched{noise_sched_val}",
                                                 "args": args
                                             })
+            if opti == 'adam':
+                for noise_type_val in adaptive_noise_types:
+                    for noise_mag_val in adaptive_noise_magnitudes:
+                        for noise_dist_val in adaptive_noise_dist:
+                            for noise_sched_val in adaptive_noise_schedules:
+                                for perm_val in adaptive_permanent:
+                                    for stuck_only_val in adaptive_stuck_only:
+                                        args = (run_noise_experiment(model, sub, opti, momentum_val, 0.9, 0.999,
+                                                                     noise_type_val, noise_dist_val, noise_mag_val,
+                                                                     noise_sched_val, None,
+                                                                     perm_val, stuck_only_val, patience,
+                                                                     )
+                                                + common_args)
+                                        experiments.append({
+                                            "name": f"{model}_{sub}_Adaptive_{noise_type_val}_Mag{noise_mag_val}_Sched{noise_sched_val}",
+                                            "args": args
+                                        })
 
 # Create experiment log file
 log_file = os.path.join(experiments_dir, "experiments_log.json")
