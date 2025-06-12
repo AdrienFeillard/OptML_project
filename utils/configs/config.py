@@ -20,11 +20,6 @@ class Classifier(str, Enum):
     tiny_cnn = "tiny_cnn"
     baby_cnn = "baby_cnn"
 
-    # CNN architectures
-    deep_cnn = "deep_cnn"
-    moderate_cnn = "moderate_cnn"
-    mini_cnn = "mini_cnn"
-
 
 class LoggerType(str, Enum):
     tensorboard = "tensorboard"

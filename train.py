@@ -3,7 +3,7 @@ import time
 import datetime
 import typer
 import torch
-import torch_directml
+#import torch_directml
 import numpy as np
 from typing import Optional, List, Tuple, Any, Dict
 
