@@ -318,9 +318,9 @@ def evaluate_model(model, data_loader, device, criterion):
     classes = data_loader.dataset.dataset.classes if isinstance(data_loader.dataset, Subset) else data_loader.dataset.classes
 
     # --- Initialize trackers on the CPU is fine here, as the loop is shorter ---
-    epoch_class_correct = torch.zeros(num_classes, dtype=torch.long)
-    epoch_class_loss = torch.zeros(num_classes, dtype=torch.float)
-    epoch_class_total = torch.zeros(num_classes, dtype=torch.long)
+    epoch_class_correct = torch.zeros(num_classes, dtype=torch.long, device=device)
+    epoch_class_loss = torch.zeros(num_classes, dtype=torch.float, device=device)
+    epoch_class_total = torch.zeros(num_classes, dtype=torch.long, device=device)
 
     with torch.no_grad():
         for images, targets in data_loader:
@@ -334,9 +334,23 @@ def evaluate_model(model, data_loader, device, criterion):
             correct_mask = (predicted == targets)
 
             # --- Use the fast, vectorized method ---
-            epoch_class_total += torch.bincount(targets, minlength=num_classes).cpu()
-            epoch_class_correct += torch.bincount(targets[correct_mask], minlength=num_classes).cpu()
-            epoch_class_loss += torch.bincount(targets, weights=loss_vector, minlength=num_classes).cpu()
+            for i in range(num_classes):
+                # Create a boolean mask for samples belonging to the current class 'i'
+                class_mask = (targets == i)
+
+                # Proceed only if there are samples of this class in the current batch
+                if class_mask.any():
+                    # 1. Calculate the total count of samples for class 'i' and add it
+                    epoch_class_total[i] += class_mask.sum()
+
+                    # 2. Calculate the count of correctly predicted samples for class 'i'
+                    # This is done by finding where a sample is of class 'i' AND was predicted correctly
+                    epoch_class_correct[i] += (class_mask & correct_mask).sum()
+
+                    # 3. Sum the losses for samples belonging to class 'i'
+                    # The class_mask is used to select the relevant losses from the loss_vector
+                    epoch_class_loss[i] += loss_vector[class_mask].sum()
+
             # ---
 
     # Restore the original state of the loss function
