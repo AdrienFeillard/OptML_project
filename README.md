@@ -1,6 +1,8 @@
-# CS-439 : Mini-Project 
+# Adaptive Noise Injection in CNN Training (CS-439 Mini-Project)
 
-# Adaptive Noise Injection in Convolutional Neural Network Training
+## Description
+
+This project introduces an **adaptive noise injection strategy** to improve Convolutional Neural Network (CNN) training for image classification on CIFAR-10. Addressing issues like **suboptimal convergence** and **overfitting**, our method dynamically injects noise based on real-time model parameters (e.g., loss, gradients). The goal is to help models escape local minima and enhance generalization, specifically by injecting noise only when the model appears stuck or is overfitting.
 
 ## Quickstart
 
@@ -17,14 +19,13 @@ conda activate AdaptativeNoise
 pip install -r requirements.txt
 ```
 
-### How to use the library
+## Usage
 
-- The `train.py` script is used for individual training runs. It is highly configurable via command-line arguments listed at the end of this document.
+* The **`train.py`** script is used for individual training runs. It's highly configurable via command-line arguments, which are detailed in the [Command-Line Arguments](#command-line-arguments-for-trainpy) section.
 
-- `run_experiment.py` file is parametrisable, and is used to launch many training sequencially. It will always run the baseline for each experiments.
+* The **`run_experiment.py`** script allows for extensive parameterization and is used to launch multiple training runs sequentially. It will always include a **baseline run** for comparison in each set of experiments.
 
-- A directory `checkpoints` is generated, it contains the checkpoint for each experiences launches and a `metrics` directory that contains many JSON of metrics of each experiment (all contained in `all_metrics.json`)
-
+* A **`checkpoints/`** directory is automatically generated. This directory contains model checkpoints for each experiment run, along with a **`metrics/`** subdirectory. Inside `metrics/`, you'll find multiple JSON files containing detailed metrics for each experiment.
 
 ## Project Structure
 
@@ -32,49 +33,28 @@ The directory structure of the project looks like this:
 
 ```
 .
-│
 ├── checkpoints/                              <- Generated directory : contains the checkpoints for each experiments
 │   └── metrics/                              <- Generated directory : contains JSONs of metrics for each experiments
 │
 ├── core/
 │   ├── cifar10_models/
-│   │   ├── SimpleCNN.py                      <- Custom CNN architecture of different depth
+│   │   ├── SimpleCNN.py                      <- Custom CNN architecture of different depths
 │   │   ├── resnet.py                         <- ResNet architecture (e.g., Resnet18)
-│   │   └── ...                     
+│   │   └── ...
+│   │
 │   ├── data.py                               <- Handles CIFAR-10 dataset loading and preprocessing
 │   ├── module.py                             <- Core module for neural network components
-│   ├── noise_regularization.py               <- Implements the adaptive noise injection strategy and regularization
-│   └── schduler.py                           <- Learning rate scheduler or similar optimization scheduling logic
+│   ├── noise_regularization.py               <- Implements the adaptive noise injection
+│   └── schduler.py                           <- Learning rate scheduler
 │
-├── notebooks/                                <- Directory for Jupyter notebooks (e.g., `plot_adrien.ipynb`)
+├── notebooks/                                <- Directory for plot or dataframe notebooks
 │
 ├── run_experiment.py                         <- General script for launching parametrisable experiments 
 ├── test.py                                   <- Script for evaluating trained models
 ├── train.py                                  <- Core training loop script
 │
-└── utils/                                    <- Utility functions and configuration management
+└── utils/                                    <- Utility functions
 ```
-
-## Abstract
-
-This paper explores the impact of noise injection on
-Convolutional Neural Networks trained for image classification
-on the CIFAR-10 dataset.
-Despite advances in machine learning, some challenges like
-poor convergence to optimal solutions and model overfitting
-persist, limiting the practical application and reliability of CNNs
-The injection of noise can be used to address both these issues.
-This study investigates the role of the noise in helping the
-model to converge to optimal solution by escaping local minima
-or saddle points and also address the impact of the noise as a
-regularizer and on the generalization of the models.
-Our solution is to inject an adaptive noise, that is activated
-and scaled using the model parameters, such as the loss or the
-gradient. The goal is to inject the noise only at specific times,
-when the model might be stuck on a local minimum or might be
-overfitting. We tried this Noise injection on four different models,
-using different optimizers and noise types.
-
 
 ### Command-Line Arguments for `train.py`
 
