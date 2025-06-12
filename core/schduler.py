@@ -144,3 +144,123 @@ class WarmupCosineLR(_LRScheduler):
             )
             for base_lr in self.base_lrs
         ]
+
+class CosineAnnealingWithDecayingRestartsLR(_LRScheduler):
+    """
+    Custom scheduler that implements cosine annealing with warm restarts, where the
+    maximum learning rate decays linearly over the entire training duration.
+    """
+
+    def __init__(
+            self,
+            optimizer: Optimizer,
+            T_0: int,
+            total_steps: int,
+            eta_min: float = 0,
+            final_lr_scale: float = 0.5,
+            T_mult: int = 1,
+            last_epoch: int = -1,
+    ):
+        """
+        Args:
+            optimizer (Optimizer): Wrapped optimizer.
+            T_0 (int): Number of steps in the first restart cycle.
+            total_steps (int): Total number of steps in the entire training process.
+                               Used to calculate the decay of the max LR.
+            eta_min (float): Minimum learning rate. Default: 0.
+            final_lr_scale (float): The final restart LR will be
+                                    `eta_min + (base_lr - eta_min) * final_lr_scale`.
+                                    A scale of 0.5 means it ends at the mean of base and min.
+            T_mult (int): A factor that increases T_i after a restart. Default: 1.
+            last_epoch (int): The index of the last epoch. Default: -1.
+        """
+        if T_0 <= 0 or not isinstance(T_0, int):
+            raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
+        if T_mult < 1 or not isinstance(T_mult, int):
+            raise ValueError("Expected integer T_mult >= 1, but got {}".format(T_mult))
+
+        self.T_0 = T_0
+        self.T_i = T_0
+        self.T_mult = T_mult
+        self.eta_min = eta_min
+        self.total_steps = total_steps
+        self.final_lr_scale = final_lr_scale
+        self.T_cur = last_epoch
+        super().__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        if not self._get_lr_called_within_step:
+            warnings.warn(
+                "To get the last learning rate computed by the scheduler, "
+                "please use `get_last_lr()`.",
+                UserWarning,
+            )
+
+        new_lrs = []
+        for base_lr in self.base_lrs:
+            # --- 1. Calculate the current (decaying) maximum learning rate ---
+            progress = self.last_epoch / self.total_steps
+
+            # The final restart LR is a scaled value between eta_min and base_lr
+            final_max_lr = self.eta_min + (base_lr - self.eta_min) * self.final_lr_scale
+
+            # Linearly decay the max LR from base_lr down to final_max_lr
+            current_max_lr = base_lr - progress * (base_lr - final_max_lr)
+
+            # --- 2. Apply the standard cosine annealing formula ---
+            # Using the new decaying max_lr instead of the fixed base_lr
+            term1 = self.eta_min
+            term2_numerator = current_max_lr - self.eta_min
+            term2_denominator = 2
+            term2_multiplier = 1 + math.cos(math.pi * self.T_cur / self.T_i)
+
+            lr = term1 + (term2_numerator / term2_denominator) * term2_multiplier
+            new_lrs.append(lr)
+
+        return new_lrs
+
+    def step(self, epoch=None):
+        """
+        Advances the scheduler. If T_cur reaches T_i, a restart happens.
+        """
+        if epoch is None:
+            epoch = self.last_epoch + 1
+            self.T_cur = self.T_cur + 1
+            if self.T_cur >= self.T_i:
+                self.T_cur = self.T_cur - self.T_i
+                self.T_i = self.T_i * self.T_mult
+        else:
+            # This part is for state dict loading, not typical use
+            if epoch < 0:
+                epoch = 0
+            if epoch >= self.T_0:
+                if self.T_mult == 1:
+                    self.T_cur = epoch % self.T_0
+                    self.T_i = self.T_0
+                else:
+                    # Complex case for T_mult > 1, not needed for your request
+                    n = int(math.log((epoch / self.T_0 * (self.T_mult - 1) + 1), self.T_mult))
+                    self.T_cur = epoch - self.T_0 * (self.T_mult ** n - 1) / (self.T_mult - 1)
+                    self.T_i = self.T_0 * self.T_mult ** (n)
+            else:
+                self.T_i = self.T_0
+                self.T_cur = epoch
+
+        self.last_epoch = math.floor(epoch)
+
+        class _enable_get_lr_call:
+            def __init__(self, sched):
+                self.sched = sched
+
+            def __enter__(self):
+                self.sched._get_lr_called_within_step = True
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                self.sched._get_lr_called_within_step = False
+
+        with _enable_get_lr_call(self):
+            for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
+                param_group['lr'] = lr
+
+        self._last_lr = [group['lr'] for group in self.optimizer.param_groups]

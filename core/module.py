@@ -21,8 +21,8 @@ from .cifar10_models.mobilenetv2 import mobilenet_v2
 from .cifar10_models.resnet import resnet18, resnet34, resnet50
 from .cifar10_models.vgg import vgg11_bn, vgg13_bn, vgg16_bn, vgg19_bn
 from .cifar10_models.SimpleCNN import simple_cnn, tiny_cnn, baby_cnn
-from .schduler import WarmupCosineLR
-from .cifar10_models.SizeCNN import deep_cnn, moderate_cnn, mini_cnn
+from .schduler import WarmupCosineLR, CosineAnnealingWithDecayingRestartsLR
+#from .cifar10_models.ParametrableCNN import deep_cnn, moderate_cnn, mini_cnn
 from .noise_regularization import NoiseType, NoiseRegularizer, NoiseDistribution # Ensure NoiseType is imported
 
 console = Console()
@@ -40,10 +40,13 @@ all_classifiers = {
     "googlenet": googlenet, "inception_v3": inception_v3, "simple_cnn": simple_cnn,
     "tiny_cnn": tiny_cnn, "baby_cnn": baby_cnn,
 
-    # CNN architectures
-    "deep_cnn": deep_cnn(),
-    "moderate_cnn": moderate_cnn(),
-    "mini_cnn": mini_cnn(),
+    # # CNN architectures
+    # "deep_cnn": deep_cnn(),
+    # "deep_cnn_r": deep_cnn(use_regularization=True),  # Regularized deep CNN
+    # "moderate_cnn": moderate_cnn(),
+    # "moderate_cnn_r": moderate_cnn(use_regularization=True),  # Regularized moderate CNN
+    # "mini_cnn": mini_cnn(),
+    # "mini_cnn_r": mini_cnn(use_regularization=True)  # Regularized mini CNN
 }
 
 architecture_info = {
@@ -142,7 +145,7 @@ class CIFAR10Module(nn.Module):
         outputs = self.model(images)
         return outputs
 
-    def configure_optimizer(self):
+    def configure_optimizer(self, steps_per_epoch: int): # Add steps_per_epoch as an argument
         if self.args.optimizer == "sgd":
             print("Using SGD optimizer")
             print("momentum: ", self.args.momentum)
@@ -164,35 +167,39 @@ class CIFAR10Module(nn.Module):
                 self.parameters(), lr=self.args.learning_rate, weight_decay=self.args.weight_decay,
                 betas=(self.args.beta1, self.args.beta2),
             )
-        total_steps = self.args.max_epochs * 50000 // self.args.batch_size
-        warmup_steps = int(total_steps * 0.3)
-        """scheduler = WarmupCosineLR(
-            optimizer, warmup_epochs=warmup_steps, max_epochs=total_steps,
-            warmup_start_lr=1e-6, eta_min=1e-6,
-        )"""
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+
+        # --- START: Corrected Scheduler Logic ---
+        # Calculate T_0 in terms of batches, not epochs
+        restart_period_in_steps = self.args.lr_restart_period * steps_per_epoch
+
+        total_training_steps = self.args.max_epochs * steps_per_epoch
+        restart_period_in_steps = self.args.lr_restart_period * steps_per_epoch
+
+        # Use the new custom scheduler
+        scheduler = CosineAnnealingWithDecayingRestartsLR(
             optimizer,
-            T_0=self.args.lr_restart_period, # Number of epochs for the first cycle
-            T_mult=1, # Can be > 1 to make cycles longer over time
-            eta_min=1e-6 # The minimum learning rate
+            T_0=restart_period_in_steps,        # Number of batches for the first cycle
+            eta_min=1e-6,                       # Your specified minimum LR
+            total_steps=total_training_steps,   # Total steps for the full decay
+            final_lr_scale=0.5,                 # End at the mean of max and min
+            T_mult=1
         )
+        # --- END: New Scheduler Configuration ---
+
+        # Update the info table to reflect the new scheduler
         optim_table = Table(box=box.SIMPLE, title="Optimization Setup")
         optim_table.add_column("Parameter", style="yellow")
         optim_table.add_column("Value", style="cyan")
-        optim_table.add_row("Optimizer", "SGD")
-        optim_table.add_row("Learning Rate", str(self.args.learning_rate))
-        optim_table.add_row("Weight Decay", str(self.args.weight_decay))
-        optim_table.add_row("Momentum", "0.9")
-        optim_table.add_row("Nesterov", "True")
-        #optim_table.add_row("Scheduler", "WarmupCosineLR")
-        #optim_table.add_row("Warmup Steps", str(warmup_steps))
-        optim_table.add_row("Scheduler", "CosineAnnealingWarmRestarts")
-        optim_table.add_row("Restart Period (T_0)", str(self.args.lr_restart_period))
-        optim_table.add_row("Total Steps", str(total_steps))
-        optim_table.add_row("Min LR", "1e-6")
+        optim_table.add_row("Optimizer", self.args.optimizer.value)
+        optim_table.add_row("Initial Learning Rate", str(self.args.learning_rate))
+        optim_table.add_row("Scheduler", "CosineAnnealingWithDecayingRestartsLR")
+        optim_table.add_row("Restart Period (T_0)", f"{self.args.lr_restart_period} epochs ({restart_period_in_steps} steps)")
+        optim_table.add_row("Total Training Steps", str(total_training_steps))
+        optim_table.add_row("Min LR (eta_min)", "1e-6")
+        optim_table.add_row("Final Restart LR Scale", "0.5 (Mean of Max and Min)")
         console.print(Panel(optim_table, title="Optimizer Configuration", border_style="green"))
-        return optimizer, scheduler
 
+        return optimizer, scheduler
     def calculate_accuracy(self, outputs, targets):
         _, predicted = outputs.max(1)
         correct = predicted.eq(targets).sum().item()
