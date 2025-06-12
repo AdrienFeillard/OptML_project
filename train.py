@@ -3,7 +3,7 @@ import time
 import datetime
 import typer
 import torch
-#import torch_directml
+import torch_directml
 import numpy as np
 from typing import Optional, List, Tuple, Any, Dict
 
@@ -13,11 +13,12 @@ from rich.layout import Layout
 from rich.live import Live
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
 from rich.traceback import install as install_rich_traceback
+from torch.utils.data import Subset
 
-from core.data import CIFAR10Data
+from core.data import CIFARData
 from core.module import CIFAR10Module, Optimizer as OptimizerChoice
 from utils.logging import LogHandler
-from utils.metrics import TrainingMetrics
+from utils.metrics import TrainingMetrics, evaluate_model
 from utils.visualization import create_dashboard, visualize_lr_schedule
 from utils.configs.config import Classifier, NoiseDistribution
 from core.noise_regularization import NoiseType, NoiseSchedule
@@ -30,9 +31,11 @@ from utils.visualization import (
 install_rich_traceback(show_locals=True)
 console = Console()
 
+
 class ArgsNamespace:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
+
 
 def _create_args_namespace(
         data_dir: str, checkpoint_name: str, download_weights: bool, classifier: Classifier,
@@ -53,6 +56,7 @@ def _create_args_namespace(
         min_cooldown_epochs: int,
         max_cooldown_epochs: int,
         lr_restart_period: int,
+        detailed_metrics: bool,
 ) -> ArgsNamespace:
     return ArgsNamespace(
         data_dir=data_dir, checkpoint_name=checkpoint_name, download_weights=download_weights,
@@ -63,12 +67,12 @@ def _create_args_namespace(
         momentum=momentum, beta1=beta1, beta2=beta2, permanent=permanent,
         noise_during_stuck_only=noise_during_stuck_only, patience=patience, subset=subset,
         test_phase=False, visualize_lr=visualize_lr, model=None,
-        flag_min_epochs_to_check = flag_min_epochs_to_check, flag_window_size = flag_window_size,
-        flag_overfitting_val_loss_epochs = flag_overfitting_val_loss_epochs,
-        flag_plateau_min_delta = flag_plateau_min_delta,
+        flag_min_epochs_to_check=flag_min_epochs_to_check, flag_window_size=flag_window_size,
+        flag_overfitting_val_loss_epochs=flag_overfitting_val_loss_epochs,
+        flag_plateau_min_delta=flag_plateau_min_delta,
         flag_grad_plateau_thr=flag_grad_plateau_thr,
-        flag_low_weight_update_threshold = flag_low_weight_update_threshold,
-        disable_adaptive_flags = disable_adaptive_flags,
+        flag_low_weight_update_threshold=flag_low_weight_update_threshold,
+        disable_adaptive_flags=disable_adaptive_flags,
         disable_graphs=disable_graphs,
         relative_min_noise=relative_min_noise,
         relative_max_noise=relative_max_noise,
@@ -76,7 +80,9 @@ def _create_args_namespace(
         min_cooldown_epochs=min_cooldown_epochs,
         max_cooldown_epochs=max_cooldown_epochs,
         lr_restart_period=lr_restart_period,
+        detailed_metrics=detailed_metrics,
     )
+
 
 def _setup_environment(args: ArgsNamespace, log_handler: LogHandler) -> torch.device:
     torch.manual_seed(0)
@@ -90,16 +96,10 @@ def _setup_environment(args: ArgsNamespace, log_handler: LogHandler) -> torch.de
         log_handler.log("SYSTEM", f"Using DirectML device: {device}")
     except Exception as e:
         log_handler.log("ERROR", f"Error initializing DirectML: {e}")
+        log_handler.log("SYSTEM", "Falling back to CPU")
+        device = torch.device("cpu")
+    return device
 
-        if torch.cuda.is_available():
-            device = torch.device("cuda")
-            print("CUDA USED")
-        elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
-            device = torch.device("mps")
-            print("MPS USED")
-        else:
-            device = torch.device("cpu")
-            print("CPU USED")
 
 def _initialize_training_components(args: ArgsNamespace) -> Tuple[TrainingMetrics, LogHandler]:
     experiment_name = f"{args.classifier}_{args.noise_type}"
@@ -111,20 +111,25 @@ def _initialize_training_components(args: ArgsNamespace) -> Tuple[TrainingMetric
     log_handler.log("SYSTEM", f"Starting CIFAR-10 training with {args.classifier}")
     return training_metrics, log_handler
 
-def _prepare_data_and_model(args: ArgsNamespace, device: torch.device, log_handler: LogHandler) -> Tuple[CIFAR10Module, CIFAR10Data]:
+
+def _prepare_data_and_model(args: ArgsNamespace, device: torch.device, log_handler: LogHandler) -> Tuple[
+    CIFAR10Module, CIFARData]:
     log_handler.log("MODEL", f"Creating {args.classifier} model...")
+    # The model now depends on args.num_classes, which must be set first.
     model = CIFAR10Module(args)
-    log_handler.log("DATA", "Preparing CIFAR-10 dataset...")
-    cifar_data = CIFAR10Data(args)
-    cifar_data.prepare_data()
-    cifar_data.setup()
+    log_handler.log("DATA", f"Preparing {args.dataset_name} dataset...")
+    # The data module is now created outside this function, so we just receive it.
+    cifar_data = args.cifar_data_module
     model.to(device)
     log_handler.log("MODEL", f"Model moved to device: {device}")
     return model, cifar_data
 
-def _configure_optimizer_and_scheduler(model: CIFAR10Module, args: ArgsNamespace, train_loader_len: int, log_handler: LogHandler) -> Tuple[torch.optim.Optimizer, Any]:
+
+def _configure_optimizer_and_scheduler(model: CIFAR10Module, args: ArgsNamespace, train_loader_len: int,
+                                       log_handler: LogHandler) -> Tuple[torch.optim.Optimizer, Any]:
     optimizer, scheduler = model.configure_optimizer()
-    log_handler.log("OPTIMIZER", f"Created optimizer: {args.optimizer.value}, lr={args.learning_rate}, wd={args.weight_decay}")
+    log_handler.log("OPTIMIZER",
+                    f"Created optimizer: {args.optimizer.value}, lr={args.learning_rate}, wd={args.weight_decay}")
     if args.visualize_lr:
         total_steps = args.max_epochs * train_loader_len
         vis_optimizer, vis_scheduler = model.configure_optimizer()
@@ -132,10 +137,20 @@ def _configure_optimizer_and_scheduler(model: CIFAR10Module, args: ArgsNamespace
         visualize_lr_schedule(vis_optimizer, vis_scheduler, total_steps)
     return optimizer, scheduler
 
-def _apply_noise_regularization_epoch_start(model: CIFAR10Module, epoch: int, training_metrics: TrainingMetrics, log_handler: LogHandler):
+
+def _apply_noise_regularization_epoch_start(model: CIFAR10Module, epoch: int, training_metrics: TrainingMetrics,
+                                            log_handler: LogHandler):
+    """
+    Logs the noise regularizer's current state without recalculating it.
+    """
     if hasattr(model, 'noise_regularizer') and model.noise_regularizer:
-        model.noise_regularizer.update_epoch(epoch)
+        # --- THIS IS THE FIX ---
+        # DO NOT call model.noise_regularizer.update_epoch(epoch) here.
+        # The magnitude is now calculated adaptively inside _train_epoch.
+        # We just need to read the value that was already set.
         current_magnitude = model.noise_regularizer.current_magnitude
+        # --- END OF FIX ---
+
         training_metrics.log_noise_metrics(
             noise_type=str(model.noise_regularizer.noise_type.value),
             noise_magnitude=current_magnitude,
@@ -143,13 +158,17 @@ def _apply_noise_regularization_epoch_start(model: CIFAR10Module, epoch: int, tr
         )
         # Only log if noise is actually ON
         if model.noise_regularizer.noise_type != NoiseType.none:
-            log_handler.log("NOISE", f"Applying {model.noise_regularizer.noise_type.value} noise with magnitude {current_magnitude:.6f}")
+            log_handler.log("NOISE",
+                            f"Applying {model.noise_regularizer.noise_type.value} noise with magnitude {current_magnitude:.6f}")
+
+
 
 # Renamed and modified to specifically detect flags and return their state
 def _detect_stagnation_flags(
         args: ArgsNamespace, training_metrics: TrainingMetrics, log_handler: LogHandler, current_epoch: int
 ) -> tuple[dict[str, bool], dict[str, float]]:
-    flag_states = { "grad_norm_plateau": False, "low_weight_update": False, "val_loss_plateau": False, "overfitting": False }
+    flag_states = {"grad_norm_plateau": False, "low_weight_update": False, "val_loss_plateau": False,
+                   "overfitting": False}
     flag_details = {}
 
     if current_epoch < args.flag_min_epochs_to_check:
@@ -175,8 +194,10 @@ def _detect_stagnation_flags(
 
             # If improvement is less than our threshold, it has plateaued
             if relative_improvement < args.flag_grad_plateau_thr:
-                log_handler.log("FLAG_DETECTED", f"Epoch {current_epoch}: GRADIENT NORM PLATEAU (improvement: {relative_improvement:.2%}).")
-                training_metrics.log_optimization_flag(current_epoch, "GRAD_NORM_PLATEAU", {"relative_improvement": relative_improvement})
+                log_handler.log("FLAG_DETECTED",
+                                f"Epoch {current_epoch}: GRADIENT NORM PLATEAU (improvement: {relative_improvement:.2%}).")
+                training_metrics.log_optimization_flag(current_epoch, "GRAD_NORM_PLATEAU",
+                                                       {"relative_improvement": relative_improvement})
                 flag_states["grad_norm_plateau"] = True
                 flag_details["grad_norm_relative_improvement"] = relative_improvement
 
@@ -186,39 +207,45 @@ def _detect_stagnation_flags(
         if len(relevant_history) == WINDOW_SIZE:
             avg_recent_update_norm = sum(relevant_history) / WINDOW_SIZE
             if avg_recent_update_norm < args.flag_low_weight_update_threshold:
-                log_handler.log("FLAG_DETECTED", f"Epoch {current_epoch}: LOW WEIGHT UPDATE NORM (avg: {avg_recent_update_norm:.2e}).")
-                training_metrics.log_optimization_flag(current_epoch, "LOW_WEIGHT_UPDATE_NORM", {"avg_norm": avg_recent_update_norm})
+                log_handler.log("FLAG_DETECTED",
+                                f"Epoch {current_epoch}: LOW WEIGHT UPDATE NORM (avg: {avg_recent_update_norm:.2e}).")
+                training_metrics.log_optimization_flag(current_epoch, "LOW_WEIGHT_UPDATE_NORM",
+                                                       {"avg_norm": avg_recent_update_norm})
                 flag_states["low_weight_update"] = True
-
 
     # Validation Loss Plateau Flag
     if len(val_loss_history) >= current_epoch and current_epoch > 0:
-        recent_val_losses = val_loss_history[max(0, current_epoch - WINDOW_SIZE) : current_epoch]
+        recent_val_losses = val_loss_history[max(0, current_epoch - WINDOW_SIZE): current_epoch]
         if len(recent_val_losses) == WINDOW_SIZE:
             net_improvement = recent_val_losses[0] - recent_val_losses[-1]
             if net_improvement < PLATEAU_DELTA:
-                log_handler.log("FLAG_DETECTED", f"Epoch {current_epoch}: Validation Loss PLATEAU (net improvement {net_improvement:.2e} < {PLATEAU_DELTA:.2e}).")
-                training_metrics.log_optimization_flag(current_epoch, "VAL_LOSS_PLATEAU", {"net_improvement": net_improvement})
+                log_handler.log("FLAG_DETECTED",
+                                f"Epoch {current_epoch}: Validation Loss PLATEAU (net improvement {net_improvement:.2e} < {PLATEAU_DELTA:.2e}).")
+                training_metrics.log_optimization_flag(current_epoch, "VAL_LOSS_PLATEAU",
+                                                       {"net_improvement": net_improvement})
                 flag_states["val_loss_plateau"] = True
                 flag_details["val_loss_net_improvement"] = net_improvement
 
-
-    # Overfitting Flag
     if len(val_loss_history) >= current_epoch and len(train_loss_history) >= current_epoch and current_epoch > 0:
-        recent_val_losses = val_loss_history[max(0, current_epoch - WINDOW_SIZE) : current_epoch]
-        recent_train_losses = train_loss_history[max(0, current_epoch - WINDOW_SIZE) : current_epoch]
+        recent_val_losses = val_loss_history[max(0, current_epoch - WINDOW_SIZE): current_epoch]
+        recent_train_losses = train_loss_history[max(0, current_epoch - WINDOW_SIZE): current_epoch]
 
         if len(recent_val_losses) == WINDOW_SIZE and len(recent_train_losses) == WINDOW_SIZE:
-            val_loss_increasing_count = sum(1 for i in range(1, WINDOW_SIZE) if recent_val_losses[i] > recent_val_losses[i-1] + PLATEAU_DELTA / 10)
-            train_loss_decreasing_count = sum(1 for i in range(1, WINDOW_SIZE) if recent_train_losses[i] < recent_train_losses[i-1] - PLATEAU_DELTA / 10)
+            val_loss_increasing_count = sum(1 for i in range(1, WINDOW_SIZE) if
+                                            recent_val_losses[i] > recent_val_losses[i - 1] + PLATEAU_DELTA / 10)
+            train_loss_decreasing_count = sum(1 for i in range(1, WINDOW_SIZE) if
+                                              recent_train_losses[i] < recent_train_losses[i - 1] - PLATEAU_DELTA / 10)
             if val_loss_increasing_count >= args.flag_overfitting_val_loss_epochs and \
                     train_loss_decreasing_count >= args.flag_overfitting_val_loss_epochs:
-                log_handler.log("FLAG_DETECTED", f"Epoch {current_epoch}: Potential OVERFITTING. Val loss trend up, Train loss trend down.")
-                training_metrics.log_optimization_flag(current_epoch, "OVERFITTING", {"val_loss_increasing_epochs": val_loss_increasing_count, "train_loss_decreasing_epochs": train_loss_decreasing_count})
+                log_handler.log("FLAG_DETECTED", f"Epoch {current_epoch}: Potential OVERFITTING. Val loss trend up, "
+                                                 f"Train loss trend down.")
+                training_metrics.log_optimization_flag(current_epoch, "OVERFITTING",
+                                                       {"val_loss_increasing_epochs": val_loss_increasing_count,
+                                                        "train_loss_decreasing_epochs": train_loss_decreasing_count})
                 flag_states["overfitting"] = True
 
-
     return flag_states, flag_details
+
 
 def _apply_weight_noise_step(
         model: CIFAR10Module, args: ArgsNamespace, permanent: bool,
@@ -243,15 +270,18 @@ def _apply_weight_noise_step(
             )
     return original_weights_saved_this_batch
 
+
 def _apply_label_noise_step(model: CIFAR10Module, targets: torch.Tensor) -> torch.Tensor:
     if hasattr(model, 'noise_regularizer') and model.noise_regularizer and \
             model.noise_regularizer.noise_type == NoiseType.label:
         return model.noise_regularizer.apply_label_noise(targets)
     return targets
 
+
 def _restore_weights_step(model: CIFAR10Module, original_weights_saved_this_batch: bool):
     if original_weights_saved_this_batch:
         model.noise_regularizer.restore_weights(model)
+
 
 def _apply_gradient_noise_step(
         model: CIFAR10Module, epoch: int, batch_idx: int, training_metrics: TrainingMetrics, log_handler: LogHandler
@@ -273,6 +303,7 @@ def _apply_gradient_noise_step(
                 norms_before=grad_norms_before, norms_after=grad_norms_after, epoch=epoch + 1
             )
 
+
 # Modified to handle noise activation/deactivation dynamically
 def _train_epoch(
         epoch: int, model: CIFAR10Module, train_loader: torch.utils.data.DataLoader,
@@ -281,64 +312,79 @@ def _train_epoch(
         apply_grad_noise_this_epoch: bool, apply_weight_noise_this_epoch: bool,
         noise_active_since_epoch: List[Optional[int]],
         batch_progress_widget: Progress,
-        batch_task_id: Any ,
+        batch_task_id: Any,
         dashboard_components: Dict[str, Any],
         max_epochs_for_dashboard: int,
         is_stuck_for_patience: bool,
         flag_details: dict
-) -> Tuple[float, int, int]:
+) -> Tuple[float, int, int, dict]:
     model.train()
-    train_loss, train_correct, train_total = 0.0, 0, 0
-    training_metrics.reset_batch_metrics()
+    train_correct, train_total = 0, 0
+    epoch_total_loss = 0.0
 
-    # Determine desired noise type for THIS epoch based on flags
-    desired_noise_type_for_this_epoch = NoiseType.none # Default to no noise
+    # Conditionally set up detailed trackers
+    if args.detailed_metrics:
+        num_classes = args.num_classes
+        class_names = train_loader.dataset.dataset.classes if isinstance(train_loader.dataset, Subset) else train_loader.dataset.classes
+        epoch_class_correct = torch.zeros(num_classes, dtype=torch.long, device=device)
+        epoch_class_loss = torch.zeros(num_classes, dtype=torch.float, device=device)
+        epoch_class_total = torch.zeros(num_classes, dtype=torch.long, device=device)
+        model.criterion.reduction = 'none'
+    else:
+        model.criterion.reduction = 'mean'
 
-    # --- Start of Modified Noise Logic ---
-
-    if args.noise_during_stuck_only: # User's Requirement: If True, ONLY adaptive noise
+    # --- Start of Noise Logic ---
+    desired_noise_type_for_this_epoch = NoiseType.none
+    if args.noise_during_stuck_only:  # User's Requirement: If True, ONLY adaptive noise
         # Noise is currently inactive, check if any adaptive flag should activate it
         if apply_grad_noise_this_epoch:
             desired_noise_type_for_this_epoch = NoiseType.gradient
-            log_handler.log("NOISE_ACTIVATED", f"Epoch {epoch+1}: Activating GRADIENT noise due to adaptive flags (Low Grad Norm / Low Weight Update).")
-            noise_active_since_epoch[0] = epoch + 1 # Mark epoch when noise became active
+            log_handler.log("NOISE_ACTIVATED",
+                            f"Epoch {epoch + 1}: Activating GRADIENT noise due to adaptive flags (Low Grad Norm / Low Weight Update).")
+            noise_active_since_epoch[0] = epoch + 1  # Mark epoch when noise became active
         elif apply_weight_noise_this_epoch:
             desired_noise_type_for_this_epoch = NoiseType.weight
-            log_handler.log("NOISE_ACTIVATED", f"Epoch {epoch+1}: Activating WEIGHT noise due to adaptive flags (Val Loss Plateau / Overfitting).")
-            noise_active_since_epoch[0] = epoch + 1 # Mark epoch when noise became active
-        else: # If no adaptive flags triggered and in stuck-only mode, noise remains none
+            log_handler.log("NOISE_ACTIVATED",
+                            f"Epoch {epoch + 1}: Activating WEIGHT noise due to adaptive flags (Val Loss Plateau / Overfitting).")
+            noise_active_since_epoch[0] = epoch + 1  # Mark epoch when noise became active
+        else:  # If no adaptive flags triggered and in stuck-only mode, noise remains none
             # Strategy for deactivation:
             if noise_active_since_epoch[0] is not None:
                 desired_noise_type_for_this_epoch = NoiseType.none
-                log_handler.log("NOISE_DEACTIVATED", f"Epoch {epoch+1}: Deactivating noise as triggering conditions are no longer met (in stuck-only mode).")
-                noise_active_since_epoch[0] = None # Mark noise as inactive
+                log_handler.log("NOISE_DEACTIVATED",
+                                f"Epoch {epoch + 1}: Deactivating noise as triggering conditions are no longer met (in stuck-only mode).")
+                noise_active_since_epoch[0] = None  # Mark noise as inactive
             # Else (noise was already inactive and no flags fired), desired_noise_type remains none.
 
-    else: # args.noise_during_stuck_only = False (User's Requirement: Continuous OR specific adaptive after patience)
+    else:  # args.noise_during_stuck_only = False (User's Requirement: Continuous OR specific adaptive after patience)
         # Check if adaptive flags are triggered first (they take precedence if noise is currently inactive)
-        if noise_active_since_epoch[0] is None: # Only activate adaptively if currently inactive
+        if noise_active_since_epoch[0] is None:  # Only activate adaptively if currently inactive
             if apply_grad_noise_this_epoch:
                 desired_noise_type_for_this_epoch = NoiseType.gradient
-                log_handler.log("NOISE_ACTIVATED", f"Epoch {epoch+1}: Activating ADAPTIVE GRADIENT noise (not stuck-only mode).")
+                log_handler.log("NOISE_ACTIVATED",
+                                f"Epoch {epoch + 1}: Activating ADAPTIVE GRADIENT noise (not stuck-only mode).")
                 noise_active_since_epoch[0] = epoch + 1
             elif apply_weight_noise_this_epoch:
                 desired_noise_type_for_this_epoch = NoiseType.weight
-                log_handler.log("NOISE_ACTIVATED", f"Epoch {epoch+1}: Activating ADAPTIVE WEIGHT noise (not stuck-only mode).")
+                log_handler.log("NOISE_ACTIVATED",
+                                f"Epoch {epoch + 1}: Activating ADAPTIVE WEIGHT noise (not stuck-only mode).")
                 noise_active_since_epoch[0] = epoch + 1
-            elif is_stuck_for_patience and args.noise_type != NoiseType.none: # New condition for continuous after patience
+            elif is_stuck_for_patience and args.noise_type != NoiseType.none:  # New condition for continuous after patience
                 # This branch handles continuous noise *only after* patience is exceeded AND args.noise_type is set
                 desired_noise_type_for_this_epoch = args.noise_type
-                log_handler.log("NOISE_ACTIVATED", f"Epoch {epoch+1}: Activating CONTINUOUS noise ({args.noise_type.value}) due to patience exceeded (not stuck-only).")
-                noise_active_since_epoch[0] = epoch + 1 # Mark epoch when noise became active
+                log_handler.log("NOISE_ACTIVATED",
+                                f"Epoch {epoch + 1}: Activating CONTINUOUS noise ({args.noise_type.value}) due to patience exceeded (not stuck-only).")
+                noise_active_since_epoch[0] = epoch + 1  # Mark epoch when noise became active
             else:
                 # If no adaptive flags fired, patience not exceeded, and not in stuck-only mode,
                 # then desired_noise_type_for_this_epoch remains NoiseType.none (baseline).
-                pass # Already initialized to NoiseType.none
-        else: # If noise was active (either adaptive or continuous from previous epoch), check conditions
+                pass  # Already initialized to NoiseType.none
+        else:  # If noise was active (either adaptive or continuous from previous epoch), check conditions
             if not apply_grad_noise_this_epoch and not apply_weight_noise_this_epoch and not is_stuck_for_patience:
                 # Deactivate if no adaptive flags persist AND patience condition is no longer met
                 desired_noise_type_for_this_epoch = NoiseType.none
-                log_handler.log("NOISE_DEACTIVATED", f"Epoch {epoch+1}: Deactivating noise as triggering conditions are no longer met (not stuck-only mode).")
+                log_handler.log("NOISE_DEACTIVATED",
+                                f"Epoch {epoch + 1}: Deactivating noise as triggering conditions are no longer met (not stuck-only mode).")
                 noise_active_since_epoch[0] = None
             else:
                 # Keep noise active if adaptive flags persist OR patience condition is still met
@@ -346,13 +392,13 @@ def _train_epoch(
                     desired_noise_type_for_this_epoch = NoiseType.gradient
                 elif apply_weight_noise_this_epoch:
                     desired_noise_type_for_this_epoch = NoiseType.weight
-                elif is_stuck_for_patience and args.noise_type != NoiseType.none: # Keep continuous if still stuck and configured
+                elif is_stuck_for_patience and args.noise_type != NoiseType.none:  # Keep continuous if still stuck and configured
                     desired_noise_type_for_this_epoch = args.noise_type
-                log_handler.log("NOISE_STATUS", f"Epoch {epoch+1}: Noise remains active ({desired_noise_type_for_this_epoch.value}).")
-
+                log_handler.log("NOISE_STATUS",
+                                f"Epoch {epoch + 1}: Noise remains active ({desired_noise_type_for_this_epoch.value}).")
 
     if desired_noise_type_for_this_epoch != NoiseType.none:
-        stuckness_factor = 0.5 # Default stuckness
+        stuckness_factor = 0.5  # Default stuckness
         if desired_noise_type_for_this_epoch == NoiseType.gradient and "grad_norm_relative_improvement" in flag_details:
             improvement = flag_details["grad_norm_relative_improvement"]
             threshold = args.flag_grad_plateau_thr
@@ -368,24 +414,25 @@ def _train_epoch(
             sigmoid_val = 1 / (1 + np.exp(-k * (improvement - threshold)))
             stuckness_factor = 1.0 - sigmoid_val
 
-        raw_kick_magnitude = args.relative_min_noise + stuckness_factor * (args.relative_max_noise - args.relative_min_noise)
+        raw_kick_magnitude = args.relative_min_noise + stuckness_factor * (
+                    args.relative_max_noise - args.relative_min_noise)
 
         # 2. Calculate the "Schedule Dampening Factor"
         # This requires getting the current value of the main LR schedule
         # For simplicity, we'll simulate it here. A better way would be to query the scheduler.
         progress = epoch / args.max_epochs
-        schedule_dampening_factor = 0.5 * (1 + np.cos(np.pi * progress)) # Assuming cosine
+        schedule_dampening_factor = 0.5 * (1 + np.cos(np.pi * progress))  # Assuming cosine
 
         # 3. Calculate Final Magnitude
         final_magnitude = raw_kick_magnitude * schedule_dampening_factor
-
+        print("final magnitude",final_magnitude)
         # 4. Set it in the regularizer
         model.noise_regularizer.current_magnitude = final_magnitude
-        log_handler.log("NOISE_DYNAMIC", f"Dynamic noise magnitude set to {final_magnitude:.6f} (raw_kick: {raw_kick_magnitude:.4f}, schedule_dampening: {schedule_dampening_factor:.2f})")
+        log_handler.log("NOISE_DYNAMIC",
+                        f"Dynamic noise magnitude set to {final_magnitude:.6f} (raw_kick: {raw_kick_magnitude:.4f}, schedule_dampening: {schedule_dampening_factor:.2f})")
 
     model.noise_regularizer.noise_type = desired_noise_type_for_this_epoch
     _apply_noise_regularization_epoch_start(model, epoch, training_metrics, log_handler)
-
 
     for batch_idx, (images, targets) in enumerate(train_loader):
         batch_start_time = time.time()
@@ -394,16 +441,14 @@ def _train_epoch(
         original_weights_saved = False
 
         if model.noise_regularizer.noise_type == NoiseType.weight:
-            original_weights_saved = _apply_weight_noise_step(model, args, args.permanent, epoch, batch_idx, training_metrics, log_handler)
-        elif model.noise_regularizer.noise_type == NoiseType.label:
-            targets = _apply_label_noise_step(model, targets)
+            original_weights_saved = _apply_weight_noise_step(model, args, args.permanent, epoch, batch_idx,
+                                                              training_metrics, log_handler)
+
         outputs = model(images)
         loss = model.criterion(outputs, targets)
 
         optimizer.zero_grad()
-
-        # Backward pass (computes gradients for current batch)
-        loss.backward()
+        loss.mean().backward()
 
         training_metrics.log_gradient_norms(model, epoch + 1, batch_idx)
 
@@ -412,16 +457,37 @@ def _train_epoch(
         elif model.noise_regularizer.noise_type == NoiseType.gradient:
             _apply_gradient_noise_step(model, epoch, batch_idx, training_metrics, log_handler)
 
+
         optimizer.step()
         scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
 
-        train_loss += loss.item()
-        correct, total = model.calculate_accuracy(outputs, targets)
-        train_correct += correct
-        train_total += total
+        # Get overall batch accuracy once, it's fast
+        total_correct_in_batch, total_in_batch = model.calculate_accuracy(outputs, targets)
+        train_correct += total_correct_in_batch
+        train_total += total_in_batch
 
-        training_metrics.add_batch_metrics(loss.item(), correct / total, current_lr)
+        # --- CORRECTED CONDITIONAL METRIC COLLECTION ---
+        if args.detailed_metrics:
+            # Accumulate loss from the per-sample loss vector
+            epoch_total_loss += loss.sum().item()
+
+            # --- The expensive part, only run when flag is ON ---
+            correct_mask = (outputs.max(1)[1] == targets)
+            epoch_class_total += torch.bincount(targets, minlength=args.num_classes)
+            epoch_class_correct += torch.bincount(targets[correct_mask], minlength=num_classes)
+            epoch_class_loss += torch.bincount(targets, weights=loss.detach(), minlength=args.num_classes)
+            # ---
+
+            batch_loss_for_display = loss.mean().item()
+            training_metrics.add_batch_metrics(batch_loss_for_display, total_correct_in_batch / total_in_batch, current_lr)
+        else:
+            # Fast path: `loss` is already a scalar
+            epoch_total_loss += loss.item() * total_in_batch
+
+            batch_loss_for_display = loss.item()
+            training_metrics.add_batch_metrics(batch_loss_for_display, total_correct_in_batch / total_in_batch, current_lr)
+
 
         batch_progress_widget.update(batch_task_id, advance=1)
         if batch_idx % 10 == 0 or batch_idx == len(train_loader) - 1:
@@ -431,13 +497,42 @@ def _train_epoch(
                 batch_idx=batch_idx + 1, len_train_loader=len(train_loader)
             )
         if batch_idx % 50 == 0:
+            # Use the already calculated batch accuracy
+            batch_acc = total_correct_in_batch / total_in_batch
+            # Use the correct loss scalar
+            batch_loss = loss.mean().item() if args.detailed_metrics else loss.item()
             log_handler.log(
                 "BATCH",
                 f"Epoch {epoch+1}, Batch {batch_idx+1}/{len(train_loader)}, "
-                f"Loss: {loss.item():.4f}, Acc: {100.*correct/total:.2f}%, "
+                f"Loss: {batch_loss:.4f}, Acc: {100. * batch_acc:.2f}%, "
                 f"LR: {current_lr:.6f}, Time: {time.time() - batch_start_time:.2f}s"
             )
-    return train_loss, train_correct, train_total
+
+    per_class_train_metrics = None
+    if args.detailed_metrics:
+        model.criterion.reduction = 'mean'  # Reset state
+        # Move final totals to CPU once at the end of the epoch
+        epoch_class_total = epoch_class_total.cpu()
+        epoch_class_correct = epoch_class_correct.cpu()
+        epoch_class_loss = epoch_class_loss.cpu()
+
+        per_class_train_metrics = {}
+        for i in range(num_classes):
+            total_i = epoch_class_total[i].item()
+            per_class_train_metrics[class_names[i]] = {
+                'accuracy': epoch_class_correct[i].item() / total_i if total_i > 0 else 0,
+                'avg_loss': epoch_class_loss[i].item() / total_i if total_i > 0 else 0,
+            }
+
+    # If not in detailed mode, use the simple counters
+    if not args.detailed_metrics:
+        epoch_total_loss = epoch_total_loss # Already calculated
+
+    # Unify the return values
+    final_train_correct = train_correct
+    final_train_total = train_total
+
+    return epoch_total_loss, final_train_correct, final_train_total, per_class_train_metrics
 
 
 def _validate_epoch(
@@ -482,7 +577,7 @@ def _update_stuck_state(
 # In train.py, replace your existing function with this one.
 
 def _run_training_loop(
-        args: ArgsNamespace, model: CIFAR10Module, cifar_data: CIFAR10Data, device: torch.device,
+        args: ArgsNamespace, model: CIFAR10Module, cifar_data: CIFARData, device: torch.device,
         optimizer: torch.optim.Optimizer, scheduler: Any,
         training_metrics: TrainingMetrics, log_handler: LogHandler
 ) -> Tuple[float, float, Optional[dict], float]:
@@ -539,7 +634,8 @@ def _run_training_loop(
             flag_details = {}
 
             if cooldown_counter > 0:
-                log_handler.log("COOLDOWN", f"System in cooldown. Skipping flag checks. Epochs remaining: {cooldown_counter}")
+                log_handler.log("COOLDOWN",
+                                f"System in cooldown. Skipping flag checks. Epochs remaining: {cooldown_counter}")
                 cooldown_counter -= 1
             elif not args.disable_adaptive_flags and epoch > 0:
                 flag_states, flag_details = _detect_stagnation_flags(args, training_metrics, log_handler, epoch)
@@ -554,7 +650,8 @@ def _run_training_loop(
                 consecutive_noise_epochs = 0
 
             if consecutive_noise_epochs >= args.consecutive_flag_trigger:
-                log_handler.log("COOLDOWN", f"Noise triggered for {consecutive_noise_epochs} consecutive epochs. Initiating cooldown.")
+                log_handler.log("COOLDOWN",
+                                f"Noise triggered for {consecutive_noise_epochs} consecutive epochs. Initiating cooldown.")
                 stuckness_factor = 0.5
                 if "grad_norm_relative_improvement" in flag_details:
                     improvement = flag_details["grad_norm_relative_improvement"]
@@ -564,9 +661,11 @@ def _run_training_loop(
                     sigmoid_val = 1 / (1 + np.exp(-k * (improvement - threshold)))
                     stuckness_factor = 1.0 - sigmoid_val
                     print('GRadient noise stuckness factor:', stuckness_factor)
-                cooldown_duration = int(args.min_cooldown_epochs + stuckness_factor * (args.max_cooldown_epochs - args.min_cooldown_epochs))
+                cooldown_duration = int(
+                    args.min_cooldown_epochs + stuckness_factor * (args.max_cooldown_epochs - args.min_cooldown_epochs))
                 cooldown_counter = cooldown_duration
-                print("cooldown duration second part", stuckness_factor * (args.max_cooldown_epochs - args.min_cooldown_epochs))
+                print("cooldown duration second part",
+                      stuckness_factor * (args.max_cooldown_epochs - args.min_cooldown_epochs))
                 log_handler.log("COOLDOWN", f"Adaptive cooldown period set to {cooldown_duration} epochs.")
                 consecutive_noise_epochs = 0
             # --- END OF CONSOLIDATED LOGIC ---
@@ -580,12 +679,13 @@ def _run_training_loop(
             )
 
             # This separate patience logic for continuous noise mode is fine
-            current_train_loss = training_metrics.train_loss_history[-1] if training_metrics.train_loss_history else float('inf')
+            current_train_loss = training_metrics.train_loss_history[
+                -1] if training_metrics.train_loss_history else float('inf')
             is_stuck_for_patience, best_loss_for_stuck_detection, patience_counter = _update_stuck_state(
                 args, current_train_loss, best_loss_for_stuck_detection, patience_counter
             )
 
-            epoch_train_loss_sum, epoch_train_correct, epoch_train_total = _train_epoch(
+            epoch_train_loss_sum, epoch_train_correct, epoch_train_total, per_class_train_metrics = _train_epoch(
                 epoch, model, train_loader, optimizer, scheduler, device, args,
                 training_metrics, log_handler,
                 apply_grad_noise_this_epoch, apply_weight_noise_this_epoch,
@@ -597,23 +697,28 @@ def _run_training_loop(
             )
             epoch_progress_widget.update(epoch_task_id, advance=1)
 
-            avg_epoch_train_loss = epoch_train_loss_sum / len(train_loader) if len(train_loader) > 0 else 0
+            avg_epoch_train_loss = epoch_train_loss_sum / epoch_train_total if epoch_train_total > 0 else 0
             epoch_train_accuracy = 100. * epoch_train_correct / epoch_train_total if epoch_train_total > 0 else 0
 
-            epoch_val_loss_sum, epoch_val_correct, epoch_val_total = _validate_epoch(
-                epoch, model, val_loader, device, log_handler
-            )
-            avg_epoch_val_loss = epoch_val_loss_sum / len(val_loader) if len(val_loader) > 0 else 0
-            epoch_val_accuracy = 100. * epoch_val_correct / epoch_val_total if epoch_val_total > 0 else 0
+            # --- CHANGE 2: Replace the simple _validate_epoch call with the detailed evaluate_model ---
+            detailed_val_results = evaluate_model(model, val_loader, device, model.criterion)
+            avg_epoch_val_loss = detailed_val_results['loss']
+            epoch_val_accuracy = 100. * detailed_val_results['accuracy']
+            per_class_val_metrics = detailed_val_results['class_accuracy']
+            # --- End of Change 2 ---
 
             grad_norms_for_epoch = [item['total_norm'] for item in training_metrics.gradient_norms.get(epoch + 1, [])]
             avg_epoch_grad_norm = sum(grad_norms_for_epoch) / len(grad_norms_for_epoch) if grad_norms_for_epoch else 0
 
             current_lr = scheduler.get_last_lr()[0]
+
+            # --- CHANGE 3: Pass the new detailed metrics to the logger ---
             training_metrics.add_epoch_metrics(
                 epoch=epoch + 1, train_loss=avg_epoch_train_loss, train_acc=epoch_train_accuracy / 100.0,
                 val_loss=avg_epoch_val_loss, val_acc=epoch_val_accuracy / 100.0, lr=current_lr,
-                avg_grad_norm=avg_epoch_grad_norm
+                avg_grad_norm=avg_epoch_grad_norm,
+                train_class_metrics=per_class_train_metrics,
+                val_class_metrics=per_class_val_metrics
             )
 
             current_model_state_for_updates = {name: param.data.clone() for name, param in model.named_parameters() if
@@ -653,9 +758,10 @@ def _run_training_loop(
         )
     return best_acc, total_training_time, best_model_state_dict_to_save, actual_best_val_acc_for_saving
 
+
 def _finalize_and_report_training(
         args: ArgsNamespace, model: CIFAR10Module, training_metrics: TrainingMetrics,
-        best_acc_on_val: float, total_training_time: float, cifar_data: CIFAR10Data,
+        best_acc_on_val: float, total_training_time: float, cifar_data: CIFARData,
         device: torch.device, log_handler: LogHandler,
         best_model_state_dict_to_save: Optional[dict], actual_best_val_acc_for_saving: float
 ):
@@ -779,11 +885,13 @@ def main(
                                                              help="Epochs val loss must increase for overfitting flag."),
         flag_plateau_min_delta: float = typer.Option(1e-4, "--flag-plateau-delta",
                                                      help="Min improvement to not be a plateau."),
-        flag_grad_plateau_thr: float = typer.Option(0.05, "--flag-grad-plateau-thr", help="Threshold for relative gradient norm improvement (e.g., 0.05 for 5%)."),
+        flag_grad_plateau_thr: float = typer.Option(0.05, "--flag-grad-plateau-thr",
+                                                    help="Threshold for relative gradient norm improvement (e.g., 0.05 for 5%)."),
 
         flag_low_weight_update_threshold: float = typer.Option(1e-4, "--flag-low-weight-update-thr",
                                                                help="Threshold for low weight update norm flag."),
-        disable_adaptive_flags: bool = typer.Option(False, "--disable-adaptive-flags", help="Completely disable the adaptive flag system."),
+        disable_adaptive_flags: bool = typer.Option(False, "--disable-adaptive-flags",
+                                                    help="Completely disable the adaptive flag system."),
         disable_graphs: bool = typer.Option(True, "--disable-graphs", help="Disable ASCII graphs in the dashboard."),
 
         relative_min_noise: float = typer.Option(0.01, "--relative-min-noise"),
@@ -792,6 +900,9 @@ def main(
         min_cooldown_epochs: int = typer.Option(5, "--min-cooldown-epochs"),
         max_cooldown_epochs: int = typer.Option(15, "--max-cooldown-epochs"),
         lr_restart_period: int = typer.Option(50, "--lr-restart-period"),
+
+        detailed_metrics: bool = typer.Option(False, "--detailed-metrics",
+                                              help="Enable slow, detailed per-class metric collection for the training set."),
 ):
     args_obj = _create_args_namespace(
         data_dir, checkpoint_name, download_weights, classifier, batch_size, max_epochs,
@@ -807,7 +918,8 @@ def main(
         consecutive_flag_trigger,
         min_cooldown_epochs,
         max_cooldown_epochs,
-        lr_restart_period
+        lr_restart_period,
+        detailed_metrics,
     )
     class_compatible_args = ArgsNamespace(**vars(args_obj))
     class_compatible_args.classifier = args_obj.classifier.value
@@ -817,10 +929,20 @@ def main(
 
     if class_compatible_args.download_weights:
         log_handler.log("SYSTEM", "Downloading pre-trained weights...")
-        CIFAR10Data.download_weights()
+        CIFARData.download_weights()
         return
 
+    cifar_data = CIFARData(class_compatible_args)
+    cifar_data.prepare_data()
+    cifar_data.setup()
+
+    class_compatible_args.num_classes = cifar_data.num_classes
+    class_compatible_args.dataset_name = cifar_data.dataset_name  # Also useful for logging
+
+    class_compatible_args.cifar_data_module = cifar_data
+
     model, cifar_data = _prepare_data_and_model(class_compatible_args, device, log_handler)
+
     train_loader_len = len(cifar_data.train_dataloader())
     optimizer, scheduler = _configure_optimizer_and_scheduler(model, class_compatible_args, train_loader_len,
                                                               log_handler)
