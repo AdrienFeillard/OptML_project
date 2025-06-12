@@ -3,7 +3,7 @@ import time
 import datetime
 import typer
 import torch
-#import torch_directml
+import torch_directml
 import numpy as np
 from typing import Optional, List, Tuple, Any, Dict
 
@@ -137,12 +137,13 @@ def _prepare_data_and_model(args: ArgsNamespace, device: torch.device, log_handl
 
 def _configure_optimizer_and_scheduler(model: CIFAR10Module, args: ArgsNamespace, train_loader_len: int,
                                        log_handler: LogHandler) -> Tuple[torch.optim.Optimizer, Any]:
-    optimizer, scheduler = model.configure_optimizer()
+    # Pass the train_loader_len (steps_per_epoch) to the model's method
+    optimizer, scheduler = model.configure_optimizer(steps_per_epoch=train_loader_len)
     log_handler.log("OPTIMIZER",
                     f"Created optimizer: {args.optimizer.value}, lr={args.learning_rate}, wd={args.weight_decay}")
     if args.visualize_lr:
         total_steps = args.max_epochs * train_loader_len
-        vis_optimizer, vis_scheduler = model.configure_optimizer()
+        vis_optimizer, vis_scheduler = model.configure_optimizer(steps_per_epoch=train_loader_len)
         log_handler.log("LR_SCHEDULE", "Visualizing learning rate schedule...")
         visualize_lr_schedule(vis_optimizer, vis_scheduler, total_steps)
     return optimizer, scheduler
@@ -482,26 +483,24 @@ def _train_epoch(
             # Accumulate loss from the per-sample loss vector
             epoch_total_loss += loss.sum().item()
 
-            # --- The expensive part, only run when flag is ON ---
-            # correct_mask = (outputs.max(1)[1] == targets)
+            correct_mask = (outputs.max(1)[1] == targets)
 
-            # for i in range(num_classes):
-            #     # Create a mask for the current class 'i'
-            #     class_mask = (targets == i)
-            #
-            #     # If there are any samples of this class in the batch
-            #     if class_mask.any():
-            #         # 1. Calculate total samples for class 'i'
-            #         epoch_class_total[i] += class_mask.sum()
-            #
-            #         # 2. Calculate correctly predicted samples for class 'i'
-            #         # We check where the target was class 'i' AND the prediction was correct
-            #         epoch_class_correct[i] += (class_mask & correct_mask).sum()
-            #
-            #         # 3. Calculate the sum of losses for class 'i'
-            #         # We use the class_mask to select losses only for samples of class 'i'
-            #         epoch_class_loss[i] += loss.detach()[class_mask].sum()
-            # ---
+            for i in range(num_classes):
+                # Create a mask for the current class 'i'
+                class_mask = (targets == i)
+
+                # If there are any samples of this class in the batch
+                if class_mask.any():
+                    # 1. Calculate total samples for class 'i'
+                    epoch_class_total[i] += class_mask.sum()
+
+                    # 2. Calculate correctly predicted samples for class 'i'
+                    # We check where the target was class 'i' AND the prediction was correct
+                    epoch_class_correct[i] += (class_mask & correct_mask).sum()
+
+                    # 3. Calculate the sum of losses for class 'i'
+                    # We use the class_mask to select losses only for samples of class 'i'
+                    epoch_class_loss[i] += loss.detach()[class_mask].sum()
 
             batch_loss_for_display = loss.mean().item()
             training_metrics.add_batch_metrics(batch_loss_for_display, total_correct_in_batch / total_in_batch, current_lr)
