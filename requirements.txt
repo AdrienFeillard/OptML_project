@@ -1,0 +1,11 @@
+matplotlib==3.10.3
+numpy==2.3.0
+Requests==2.32.4
+rich==14.0.0
+scikit_learn==1.7.0
+sympy==1.14.0
+torch==2.7.1
+torch_directml==0.2.5.dev240914
+torchvision==0.22.1
+tqdm==4.66.5
+typer==0.16.0
