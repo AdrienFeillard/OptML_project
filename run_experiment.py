@@ -114,9 +114,9 @@ baseline_common_args = [
 # # --- SCENARIO 1: Baseline (No Noise Ever) ---
 
 print("Configuring Baseline Experiment...")
-for model in models:
-    for sub in subset:
-        for lr in lrs:
+for lr in lrs:
+    for model in models:
+        for sub in subset:
             for opti in optimizers:
                 if opti == 'sgd':
                     for momentum_val in momentums:
@@ -133,21 +133,20 @@ for model in models:
                             "args": args
                         })
 
-# --- SCENARIO 2: Adaptive Noise Injection (Triggered by Flags) ---
-print("Configuring Adaptive Noise Experiment...")
-# Parameters for this scenario:
+    # --- SCENARIO 2: Adaptive Noise Injection (Triggered by Flags) ---
+    print("Configuring Adaptive Noise Experiment...")
+    # Parameters for this scenario:
 
-adaptive_noise_types = ['none']  # Choose the specific noise type for adaptive
-adaptive_noise_magnitudes = [0.01]  # The initial magnitude for the adaptive noise
-adaptive_noise_schedules = [NoiseSchedule.cosine]  # The schedule for the adaptive noise
-adaptive_noise_dist = ['gaussian', 'uniform']
-adaptive_permanent = [True]
-adaptive_stuck_only = [True]  # KEY: True for adaptive
-patience = 10
+    adaptive_noise_types = ['none']  # Choose the specific noise type for adaptive
+    adaptive_noise_magnitudes = [0.01]  # The initial magnitude for the adaptive noise
+    adaptive_noise_schedules = [NoiseSchedule.cosine]  # The schedule for the adaptive noise
+    adaptive_noise_dist = ['gaussian', 'uniform']
+    adaptive_permanent = [True]
+    adaptive_stuck_only = [True]  # KEY: True for adaptive
+    patience = 10
 
-for model in models:
-    for sub in subset:
-        for lr in lrs:
+    for model in models:
+        for sub in subset:
             for opti in optimizers:
                 if opti == 'sgd':
                     for momentum_val in momentums:
