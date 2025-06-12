@@ -3,7 +3,7 @@ import json
 import os
 import time
 from datetime import datetime
-
+from torch.utils.data import Subset
 
 class TrainingMetrics:
     def __init__(self, experiment_name=None, save_dir="checkpoints/metrics", max_history=100):
@@ -62,7 +62,8 @@ class TrainingMetrics:
         self.current_epoch_accs.append(acc)
         self.current_batch_lrs.append(lr)
 
-    def add_epoch_metrics(self, epoch, train_loss, train_acc, val_loss, val_acc, lr, avg_grad_norm):
+
+    def add_epoch_metrics(self, epoch, train_loss, train_acc, val_loss, val_acc, lr, avg_grad_norm, train_class_metrics: dict = None, val_class_metrics: dict = None):
         self.epochs.append(epoch)
         self.train_loss_history.append(train_loss)
         self.train_acc_history.append(train_acc)
@@ -82,8 +83,15 @@ class TrainingMetrics:
 
         if self.metrics_dir:
             epoch_data = {
-                "epoch": epoch, "train_loss": train_loss, "train_acc": train_acc,
-                "val_loss": val_loss, "val_acc": val_acc, "learning_rate": lr,
+                "epoch": epoch,
+                "train_loss": train_loss,
+                "train_acc": train_acc,
+                "val_loss": val_loss,
+                "val_acc": val_acc,
+                "learning_rate": lr,
+                # Add the new dictionaries to be saved in the JSON file
+                "training_per_class_metrics": train_class_metrics,
+                "validation_per_class_metrics": val_class_metrics,
                 "timestamp": time.time()
             }
             self._append_line_to_jsonl("epoch_metrics.jsonl", epoch_data)
@@ -292,33 +300,64 @@ class TrainingMetrics:
         return avg_loss, avg_acc, last_lr
 
 
+# In metrics.py
+
 def evaluate_model(model, data_loader, device, criterion):
     model.eval()
-    total_loss, correct, total = 0.0, 0, 0
-    class_correct = [0] * 10
-    class_total = [0] * 10
+
+    # We still need to set reduction='none' if we want per-class loss
+    # and reset it at the end.
+    original_reduction = criterion.reduction
+    criterion.reduction = 'none'
+
+    total_loss_sum = 0.0
+    total_correct = 0
+    total_samples = 0
+
+    num_classes = len(data_loader.dataset.dataset.classes) if isinstance(data_loader.dataset, Subset) else len(data_loader.dataset.classes)
+    classes = data_loader.dataset.dataset.classes if isinstance(data_loader.dataset, Subset) else data_loader.dataset.classes
+
+    # --- Initialize trackers on the CPU is fine here, as the loop is shorter ---
+    epoch_class_correct = torch.zeros(num_classes, dtype=torch.long)
+    epoch_class_loss = torch.zeros(num_classes, dtype=torch.float)
+    epoch_class_total = torch.zeros(num_classes, dtype=torch.long)
+
     with torch.no_grad():
         for images, targets in data_loader:
             images, targets = images.to(device), targets.to(device)
             outputs = model(images)
-            loss = criterion(outputs, targets)
-            total_loss += loss.item()
+            loss_vector = criterion(outputs, targets) # This is a vector
+
+            total_loss_sum += loss_vector.sum().item()
+
             _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
-            c = (predicted == targets).squeeze()
-            for i in range(targets.size(0)):
-                label = targets[i]
-                class_correct[label] += c[i].item()
-                class_total[label] += 1
-    avg_loss = total_loss / len(data_loader)
-    accuracy = correct / total
+            correct_mask = (predicted == targets)
+
+            # --- Use the fast, vectorized method ---
+            epoch_class_total += torch.bincount(targets, minlength=num_classes).cpu()
+            epoch_class_correct += torch.bincount(targets[correct_mask], minlength=num_classes).cpu()
+            epoch_class_loss += torch.bincount(targets, weights=loss_vector, minlength=num_classes).cpu()
+            # ---
+
+    # Restore the original state of the loss function
+    criterion.reduction = original_reduction
+
+    # Calculate overall metrics
+    total_samples = epoch_class_total.sum().item()
+    total_correct = epoch_class_correct.sum().item()
+    avg_loss = total_loss_sum / total_samples if total_samples > 0 else 0
+    accuracy = total_correct / total_samples if total_samples > 0 else 0
+
+    # --- Final Dictionary Creation (with the range(10) bug fixed) ---
     class_accuracy = {}
-    classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-    for i in range(10):
+    for i in range(num_classes): # Use dynamic num_classes
+        total_i = epoch_class_total[i].item()
         class_accuracy[classes[i]] = {
-            'accuracy': class_correct[i] / class_total[i] if class_total[i] > 0 else 0,
-            'correct': int(class_correct[i]),
-            'total': class_total[i]
+            'accuracy': epoch_class_correct[i].item() / total_i if total_i > 0 else 0,
+            'avg_loss': epoch_class_loss[i].item() / total_i if total_i > 0 else 0,
+            'correct': epoch_class_correct[i].item(),
+            'total': total_i
         }
-    return {'loss': avg_loss, 'accuracy': accuracy, 'correct': correct, 'total': total, 'class_accuracy': class_accuracy}
+
+    return {'loss': avg_loss, 'accuracy': accuracy, 'correct': total_correct, 'total': total_samples, 'class_accuracy': class_accuracy}
+
