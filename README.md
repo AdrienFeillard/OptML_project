@@ -1,13 +1,13 @@
 # CS-439 : Mini-Project 
 
-# Adaptive Noise Injection on Convolutional Neural Network Training
+# Adaptive Noise Injection in Convolutional Neural Network Training
 
 ## Quickstart
 
 ```bash
 # clone project
 git clone git@github.com:AdrienFeillard/OptML_project.git
-cd ada-2024-project-insightmakers24
+cd OptML_project
 
 # [OPTIONAL] create conda environment
 conda create -n AdaptativeNoise
