@@ -72,7 +72,7 @@ def run_noise_experiment(model, sub, opti, momentum, beta1, beta2,
 experiments = []
 
 # List of parameter combinations for experiments
-models = ['mini_cnn', 'moderate_cnn', 'deep_cnn']
+models = ['baby_cnn', 'tiny_cnn', 'resnet18', 'simple_cnn']
 subset = [1.0]
 
 # Optimizer parameters

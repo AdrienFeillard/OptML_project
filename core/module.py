@@ -22,7 +22,7 @@ from .cifar10_models.resnet import resnet18, resnet34, resnet50
 from .cifar10_models.vgg import vgg11_bn, vgg13_bn, vgg16_bn, vgg19_bn
 from .cifar10_models.SimpleCNN import simple_cnn, tiny_cnn, baby_cnn
 from .schduler import WarmupCosineLR
-from .cifar10_models.ParametrableCNN import deep_cnn, moderate_cnn, mini_cnn
+from .cifar10_models.SizeCNN import deep_cnn, moderate_cnn, mini_cnn
 from .noise_regularization import NoiseType, NoiseRegularizer, NoiseDistribution # Ensure NoiseType is imported
 
 console = Console()
@@ -42,11 +42,8 @@ all_classifiers = {
 
     # CNN architectures
     "deep_cnn": deep_cnn(),
-    #"deep_cnn_r": deep_cnn(use_regularization=True),  # Regularized deep CNN
     "moderate_cnn": moderate_cnn(),
-    #"moderate_cnn_r": moderate_cnn(use_regularization=True),  # Regularized moderate CNN
     "mini_cnn": mini_cnn(),
-    #"mini_cnn_r": mini_cnn(use_regularization=True)  # Regularized mini CNN
 }
 
 architecture_info = {
