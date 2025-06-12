@@ -22,6 +22,7 @@ from .cifar10_models.resnet import resnet18, resnet34, resnet50
 from .cifar10_models.vgg import vgg11_bn, vgg13_bn, vgg16_bn, vgg19_bn
 from .cifar10_models.SimpleCNN import simple_cnn, tiny_cnn, baby_cnn
 from .schduler import WarmupCosineLR, CosineAnnealingWithDecayingRestartsLR
+#from .cifar10_models.ParametrableCNN import deep_cnn, moderate_cnn, mini_cnn
 from .noise_regularization import NoiseType, NoiseRegularizer, NoiseDistribution # Ensure NoiseType is imported
 
 console = Console()
@@ -36,10 +37,16 @@ all_classifiers = {
     "vgg11_bn": vgg11_bn, "vgg13_bn": vgg13_bn, "vgg16_bn": vgg16_bn, "vgg19_bn": vgg19_bn,
     "resnet18": resnet18, "resnet34": resnet34, "resnet50": resnet50, "densenet121": densenet121,
     "densenet161": densenet161, "densenet169": densenet169, "mobilenet_v2": mobilenet_v2,
-    "googlenet": googlenet, "inception_v3": inception_v3,
-    "simple_cnn": simple_cnn,
-    "tiny_cnn": tiny_cnn,
-    "baby_cnn": baby_cnn,
+    "googlenet": googlenet, "inception_v3": inception_v3, "simple_cnn": simple_cnn,
+    "tiny_cnn": tiny_cnn, "baby_cnn": baby_cnn,
+
+    # # CNN architectures
+    # "deep_cnn": deep_cnn(),
+    # "deep_cnn_r": deep_cnn(use_regularization=True),  # Regularized deep CNN
+    # "moderate_cnn": moderate_cnn(),
+    # "moderate_cnn_r": moderate_cnn(use_regularization=True),  # Regularized moderate CNN
+    # "mini_cnn": mini_cnn(),
+    # "mini_cnn_r": mini_cnn(use_regularization=True)  # Regularized mini CNN
 }
 
 architecture_info = {
@@ -168,16 +175,13 @@ class CIFAR10Module(nn.Module):
         total_training_steps = self.args.max_epochs * steps_per_epoch
         restart_period_in_steps = self.args.lr_restart_period * steps_per_epoch
 
-        # Use the new custom scheduler
         scheduler = CosineAnnealingWithDecayingRestartsLR(
             optimizer,
-            T_0=restart_period_in_steps,        # Number of batches for the first cycle
+            T_0=restart_period_in_steps,
             eta_min=1e-6,                       # Your specified minimum LR
-            total_steps=total_training_steps,   # Total steps for the full decay
-            final_lr_scale=0.5,                 # End at the mean of max and min
-            T_mult=1
+            total_steps=total_training_steps,
+            final_max_lr=1e-5                   # YOUR NEW TARGET FINAL RESTART LR
         )
-        # --- END: New Scheduler Configuration ---
 
         # Update the info table to reflect the new scheduler
         optim_table = Table(box=box.SIMPLE, title="Optimization Setup")
@@ -189,7 +193,7 @@ class CIFAR10Module(nn.Module):
         optim_table.add_row("Restart Period (T_0)", f"{self.args.lr_restart_period} epochs ({restart_period_in_steps} steps)")
         optim_table.add_row("Total Training Steps", str(total_training_steps))
         optim_table.add_row("Min LR (eta_min)", "1e-6")
-        optim_table.add_row("Final Restart LR Scale", "0.5 (Mean of Max and Min)")
+        optim_table.add_row("Final Restart LR", "1e-5") # Updated this line
         console.print(Panel(optim_table, title="Optimizer Configuration", border_style="green"))
 
         return optimizer, scheduler
