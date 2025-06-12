@@ -21,8 +21,8 @@ from .cifar10_models.mobilenetv2 import mobilenet_v2
 from .cifar10_models.resnet import resnet18, resnet34, resnet50
 from .cifar10_models.vgg import vgg11_bn, vgg13_bn, vgg16_bn, vgg19_bn
 from .cifar10_models.SimpleCNN import simple_cnn, tiny_cnn, baby_cnn
-from .cifar10_models.ParametrableCNN import deep_cnn, moderate_cnn, mini_cnn
 from .schduler import WarmupCosineLR
+from .cifar10_models.ParametrableCNN import deep_cnn, moderate_cnn, mini_cnn
 from .noise_regularization import NoiseType, NoiseRegularizer, NoiseDistribution # Ensure NoiseType is imported
 
 console = Console()
@@ -34,11 +34,11 @@ except (ImportError, TypeError) as e:
     HAS_DIRECTML = False
 
 all_classifiers = {
-    "vgg11_bn": vgg11_bn(), "vgg13_bn": vgg13_bn(), "vgg16_bn": vgg16_bn(), "vgg19_bn": vgg19_bn(),
-    "resnet18": resnet18(), "resnet34": resnet34(), "resnet50": resnet50(), "densenet121": densenet121(),
-    "densenet161": densenet161(), "densenet169": densenet169(), "mobilenet_v2": mobilenet_v2(),
-    "googlenet": googlenet(), "inception_v3": inception_v3(), "simple_cnn": simple_cnn(),
-    "tiny_cnn": tiny_cnn(), "baby_cnn": baby_cnn(),
+    "vgg11_bn": vgg11_bn, "vgg13_bn": vgg13_bn, "vgg16_bn": vgg16_bn, "vgg19_bn": vgg19_bn,
+    "resnet18": resnet18, "resnet34": resnet34, "resnet50": resnet50, "densenet121": densenet121,
+    "densenet161": densenet161, "densenet169": densenet169, "mobilenet_v2": mobilenet_v2,
+    "googlenet": googlenet, "inception_v3": inception_v3, "simple_cnn": simple_cnn,
+    "tiny_cnn": tiny_cnn, "baby_cnn": baby_cnn
 
     # CNN architectures
     "deep_cnn": deep_cnn(),
@@ -89,7 +89,8 @@ class CIFAR10Module(nn.Module):
             info_table.add_row("Description", arch_info["description"])
             console.print(info_table)
 
-        self.model = all_classifiers[args.classifier]
+        model_constructor = all_classifiers[args.classifier]
+        self.model = model_constructor(num_classes=args.num_classes)
 
         total_params = sum(p.numel() for p in self.model.parameters())
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)

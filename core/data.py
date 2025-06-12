@@ -6,7 +6,7 @@ import requests
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms as T
-from torchvision.datasets import CIFAR10
+from torchvision.datasets import CIFAR10,CIFAR100
 from tqdm import tqdm
 from rich.console import Console
 from rich.progress import Progress, TextColumn, BarColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
@@ -18,7 +18,7 @@ from sklearn.model_selection import StratifiedShuffleSplit
 # Initialize Rich console
 console = Console()
 
-class CIFAR10Data:
+class CIFARData:
     def __init__(self, args):
         self.args = args
         self.mean = (0.4914, 0.4822, 0.4465)
@@ -29,12 +29,25 @@ class CIFAR10Data:
         self.batch_size = args.batch_size
         self.num_workers = args.num_workers
 
+        if 'cifar100' in self.data_dir.lower():
+            print("Inferred CIFAR-100 from data directory path.")
+            self.dataset_name = "CIFAR-100"
+            self.dataset_class = CIFAR100
+            self.num_classes = 100
+        else:
+            print("Defaulting to CIFAR-10 based on data directory path.")
+            self.dataset_name = "CIFAR-10"
+            self.dataset_class = CIFAR10
+            self.num_classes = 10
+
         # Datasets will be initialized in setup
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset_final = None
         # Store the % of the dataset we want to use
         self.subset = args.subset
+
+        self.classes = []
 
     @staticmethod
     def download_weights():
@@ -101,16 +114,16 @@ class CIFAR10Data:
                             title="Download Complete", border_style="green"))
 
     def prepare_data(self):
-        # Create data directory if it doesn't exist
         os.makedirs(self.data_dir, exist_ok=True)
 
-        # Always use download=True to be safe
-        console.print(Panel("[bold cyan]Preparing CIFAR-10 dataset...[/bold cyan]",
+        # --- CHANGE 3: Make print statements and function calls dynamic
+        console.print(Panel(f"[bold cyan]Preparing {self.dataset_name} dataset...[/bold cyan]",
                             title="Dataset Preparation", border_style="cyan"))
         try:
-            CIFAR10(root=self.data_dir, train=True, download=True)
-            CIFAR10(root=self.data_dir, train=False, download=True)
-            console.print("[bold green]CIFAR-10 dataset ready![/bold green]")
+            # Use the dynamic self.dataset_class instead of hardcoded CIFAR10
+            self.dataset_class(root=self.data_dir, train=True, download=True)
+            self.dataset_class(root=self.data_dir, train=False, download=True)
+            console.print(f"[bold green]{self.dataset_name} dataset ready![/bold green]")
         except Exception as e:
             console.print(f"[bold red]Error downloading dataset: {e}[/bold red]")
             console.print("[yellow]Please check your internet connection and try again.[/yellow]")
@@ -149,59 +162,61 @@ class CIFAR10Data:
 
         # Load datasets
         with console.status("[cyan]Loading training dataset...[/cyan]"):
-            self.train_dataset = CIFAR10(
+            self.train_dataset = self.dataset_class(
                 root=self.data_dir, train=True, transform=train_transform
             )
 
-        with console.status("[cyan]Loading and splitting original test set for validation and final test...[/cyan]"): #
-            original_test_set = CIFAR10( #
-                root=self.data_dir, train=False, transform=test_transform #
+        with console.status("[cyan]Loading and splitting original test set for validation and final test...[/cyan]"):
+            original_test_set = self.dataset_class(
+                root=self.data_dir, train=False, transform=test_transform
             )
 
-        original_test_targets = np.array(original_test_set.targets) # For stratified split
+        original_test_targets = np.array(original_test_set.targets)
 
-        if len(original_test_set) > 0: # Ensure there are samples to split
-            splitter = StratifiedShuffleSplit(n_splits=1, test_size=0.5, random_state=42) # 50% for test_final
+        if len(original_test_set) > 0:
+            splitter = StratifiedShuffleSplit(n_splits=1, test_size=0.5, random_state=42)
             val_indices, test_final_indices = next(splitter.split(np.zeros(len(original_test_targets)), original_test_targets))
 
             self.val_dataset = Subset(original_test_set, val_indices)
             self.test_dataset_final = Subset(original_test_set, test_final_indices)
-        else: # Fallback if original_test_set is empty for some reason
+        else:
             self.val_dataset = original_test_set
             self.test_dataset_final = original_test_set
 
-
-        console.print(f"[green]Training samples: {len(self.train_dataset)}[/green]") #
+        console.print(f"[green]Training samples: {len(self.train_dataset)}[/green]")
         console.print(f"[green]Validation samples (for training): {len(self.val_dataset)}[/green]")
         console.print(f"[green]Final Test samples (held-out): {len(self.test_dataset_final)}[/green]")
 
-        classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck') #
-        console.print("[bold]CIFAR-10 Classes:[/bold]") #
-        for i, cls in enumerate(classes): #
-            console.print(f"  • Class {i}: [cyan]{cls}[/cyan]")
+        # Dynamically get and print class information
+        self.classes = self.train_dataset.classes
+        console.print(f"[bold]{self.dataset_name} Classes:[/bold]")
+        console.print(f"  • Total classes: [cyan]{len(self.classes)}[/cyan]")
+        for i, cls in enumerate(self.classes):
+                console.print(f"  • Class {i}: [cyan]{cls}[/cyan]")
 
     def train_dataloader(self):
         if self.subset < 1.0:
-            # subset_size = int(len(self.train_dataset) * self.subset)
-            # indices = torch.randperm(len(self.train_dataset)).tolist()[:subset_size]
-            # subset_train_dataset = Subset(self.train_dataset, indices)
-            # dataset = subset_train_dataset
-
-            targets = np.array(self.train_dataset.targets)  # Assure-toi que .targets existe
+            targets = np.array(self.train_dataset.targets)
             sss = StratifiedShuffleSplit(n_splits=1, train_size=self.subset, random_state=42)
             indices, _ = next(sss.split(np.zeros(len(targets)), targets))
             dataset = Subset(self.train_dataset, indices)
         else:
             dataset = self.train_dataset
 
-        dict = {}
-        for i in range(10):
-            dict[i] = 0
+        class_counts = {i: 0 for i in range(self.num_classes)}
 
-        for a, b in dataset:
-            dict[b] += 1
+        # Check if dataset has targets attribute directly
+        # The Subset wrapper does not expose targets directly, we need to access the underlying dataset
+        targets_to_iterate = []
+        if isinstance(dataset, Subset):
+            targets_to_iterate = [dataset.dataset.targets[i] for i in dataset.indices]
+        else:
+            targets_to_iterate = dataset.targets
 
-        print('Number of classes per label :',dict)
+        for label in targets_to_iterate:
+            class_counts[label] += 1
+
+        print('Number of classes per label in training subset:', class_counts)
 
         return DataLoader(
             dataset,
@@ -212,6 +227,7 @@ class CIFAR10Data:
             pin_memory=True,
             persistent_workers=True if self.num_workers > 0 else False,
         )
+
 
     def val_dataloader(self):
         # This now uses the new, smaller self.val_dataset
