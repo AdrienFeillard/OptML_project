@@ -1,6 +1,6 @@
 # CS-439 : Mini-Project 
 
-# The biases behind rating: Uncovering the hidden influences in beer ratings
+# Adaptive Noise Injection on Convolutional Neural Network Training
 
 ## Quickstart
 
