@@ -4,6 +4,8 @@
 
 This project introduces an **adaptive noise injection strategy** to improve Convolutional Neural Network (CNN) training for image classification on CIFAR-10. Addressing issues like **suboptimal convergence** and **overfitting**, our method dynamically injects noise based on real-time model parameters (e.g., loss, gradients). The goal is to help models escape local minima and enhance generalization, specifically by injecting noise only when the model appears stuck or is overfitting.
 
+(Disclaimer: Please note that running all experiments is highly time-consuming and requires more than 48 hours to complete.)
+
 ## Quickstart
 
 ```bash
@@ -12,7 +14,7 @@ git clone git@github.com:AdrienFeillard/OptML_project.git
 cd OptML_project
 
 # [OPTIONAL] create conda environment
-conda create -n AdaptativeNoise
+conda create -n AdaptativeNoise python=3.10.17
 conda activate AdaptativeNoise
 
 # install requirements
