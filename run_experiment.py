@@ -72,11 +72,11 @@ experiments = []
 # List of parameter combinations for experiments
 models = ['baby_cnn', 'tiny_cnn', 'resnet18', 'simple_cnn']
 subset = [1.0]
-lrs = [0.1, 0.01, 0.001]  # Learning rates to test
+lrs = [0.01, 0.0001, 0.00005]  # Learning rates to test
 
 # Optimizer parameters
 optimizers = ['sgd']
-momentums = [0]
+momentums = [0.0]
 
 # Common arguments for all runs
 common_args = [
@@ -126,12 +126,11 @@ for lr in lrs:
                             "args": args
                         })
                 if opti == 'adam':
-                    for momentum_val in momentums:
-                        args = run_baseline(model, sub, opti, momentum_val, 0.9, 0.999, lr) + baseline_common_args
-                        experiments.append({
-                            "name": f"{model}_{sub}_baseline_NoNoise",
-                            "args": args
-                        })
+                    args = run_baseline(model, sub, opti, 0, 0.9, 0.999, lr) + baseline_common_args
+                    experiments.append({
+                        "name": f"{model}_{sub}_baseline_NoNoise",
+                        "args": args
+                    })
 
     # --- SCENARIO 2: Adaptive Noise Injection (Triggered by Flags) ---
     print("Configuring Adaptive Noise Experiment...")
@@ -173,7 +172,7 @@ for lr in lrs:
                                 for noise_sched_val in adaptive_noise_schedules:
                                     for perm_val in adaptive_permanent:
                                         for stuck_only_val in adaptive_stuck_only:
-                                            args = (run_noise_experiment(model, sub, opti, momentum_val, 0.9, 0.999, lr,
+                                            args = (run_noise_experiment(model, sub, opti, 0, 0.9, 0.999, lr,
                                                                          noise_type_val, noise_dist_val, noise_mag_val,
                                                                          noise_sched_val, None,
                                                                          perm_val, stuck_only_val, patience,
