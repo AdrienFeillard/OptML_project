@@ -72,11 +72,11 @@ experiments = []
 # List of parameter combinations for experiments
 models = ['baby_cnn', 'tiny_cnn', 'resnet18', 'simple_cnn']
 subset = [1.0]
-lrs = [0.01, 0.0001, 0.00005]  # Learning rates to test
+lrs = [0.1, 0.01, 0.01, 0.005, 0.001, 0.0005]  # Learning rates to test
 
 # Optimizer parameters
-optimizers = ['sgd']
-momentums = [0.0]
+optimizers = ['sgd', 'adam']
+momentums = [0.0, 0.9]
 
 # Common arguments for all runs
 common_args = [
